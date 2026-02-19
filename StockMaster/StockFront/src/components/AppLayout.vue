@@ -7,30 +7,32 @@
 			</div>
 
 			<nav class="menu">
-
 				<RouterLink to="/dashboard" class="mi" active-class="active">
 					<i class="dot"></i> Dashboard
 				</RouterLink>
+
 				<RouterLink to="/productos" class="mi" active-class="active">
 					<i class="dot"></i> Productos
 				</RouterLink>
+
 				<RouterLink to="/categorias" class="mi" active-class="active">
 					<i class="dot"></i> Categorías
 				</RouterLink>
+
 				<RouterLink to="/proveedores" class="mi" active-class="active">
 					<i class="dot"></i> Proveedores
 				</RouterLink>
+
 				<RouterLink to="/inventario" class="mi" active-class="active">
 					<i class="dot"></i> Inventario
 				</RouterLink>
+
 				<RouterLink to="/reportes" class="mi" active-class="active">
 					<i class="dot"></i> Reportes
 				</RouterLink>
+
 				<RouterLink to="/usuarios" class="mi" active-class="active">
 					<i class="dot"></i> Usuarios
-				</RouterLink>
-				<RouterLink to="/configuracion" class="mi" active-class="active">
-					<i class="dot"></i> Configuración
 				</RouterLink>
 			</nav>
 
@@ -42,15 +44,32 @@
 		<main class="main">
 			<header class="top">
 				<div class="crumb">
-					<div class="ic"></div>
+					<div class="ic">
+						<!-- iconito simple para la sección -->
+						<svg viewBox="0 0 24 24" fill="none" class="icSvg">
+							<path v-if="sectionKey === 'productos'"
+								  d="M4 7h16M7 4h10M6 12h12M9 17h6"
+								  stroke="currentColor"
+								  stroke-width="2"
+								  stroke-linecap="round" />
+							<path v-else
+								  d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 4h7"
+								  stroke="currentColor"
+								  stroke-width="2"
+								  stroke-linecap="round"
+								  stroke-linejoin="round" />
+						</svg>
+					</div>
+
 					<div class="ctext">
-						<div class="c1">Dashboard</div>
+						<div class="c1">{{ sectionTitle }}</div>
 					</div>
 				</div>
 
 				<div class="topRight">
 					<button class="iconBtn" title="Notificaciones">🔔</button>
 					<button class="iconBtn" title="Buscar">🔍</button>
+
 					<div class="user">
 						<img class="avatar" src="https://i.pravatar.cc/38?img=3" alt="Admin" />
 						<span class="uname">Admin</span>
@@ -66,7 +85,38 @@
 </template>
 
 <script setup>
-import { RouterLink } from "vue-router";
+	import { computed } from "vue";
+	import { RouterLink, useRoute } from "vue-router";
+
+	const route = useRoute();
+
+	// clave de sección basada en el path (para icon y título)
+	const sectionKey = computed(() => {
+		const p = (route.path || "").toLowerCase();
+
+		if (p.startsWith("/productos")) return "productos";
+		if (p.startsWith("/categorias")) return "categorias";
+		if (p.startsWith("/proveedores")) return "proveedores";
+		if (p.startsWith("/inventario")) return "inventario";
+		if (p.startsWith("/reportes")) return "reportes";
+		if (p.startsWith("/usuarios")) return "usuarios";
+		if (p.startsWith("/configuracion")) return "configuracion";
+		return "dashboard";
+	});
+
+	const sectionTitle = computed(() => {
+		const map = {
+			dashboard: "Dashboard",
+			productos: "Productos",
+			categorias: "Categorías",
+			proveedores: "Proveedores",
+			inventario: "Inventario",
+			reportes: "Reportes",
+			usuarios: "Usuarios",
+			configuracion: "Configuración",
+		};
+		return map[sectionKey.value] || "Dashboard";
+	});
 </script>
 
 <style scoped>
@@ -92,12 +142,6 @@ import { RouterLink } from "vue-router";
 		gap: 10px;
 		padding: 8px 10px 14px;
 		font-weight: 900;
-	}
-
-	.logo {
-		width: 30px;
-		height: 30px;
-		object-fit: contain;
 	}
 
 	.btext {
@@ -187,6 +231,14 @@ import { RouterLink } from "vue-router";
 		border-radius: 12px;
 		background: rgba(59,130,246,.12);
 		border: 1px solid rgba(59,130,246,.18);
+		display: grid;
+		place-items: center;
+		color: #2563eb;
+	}
+
+	.icSvg {
+		width: 18px;
+		height: 18px;
 	}
 
 	.c1 {

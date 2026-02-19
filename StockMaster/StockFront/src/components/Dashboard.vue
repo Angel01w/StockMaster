@@ -1,5 +1,6 @@
 <template>
     <div class="dash">
+        <!-- KPIs -->
         <div class="kpis">
             <div class="kpi k1">
                 <div class="kpi-ic">
@@ -58,6 +59,7 @@
             </div>
         </div>
 
+        <!-- Chart -->
         <div class="card chart">
             <div class="card-head">
                 <div class="h">Resumen General del Inventario</div>
@@ -84,6 +86,7 @@
                             <circle v-for="(p,i) in entradasPts" :key="'eg'+i" :cx="p.x" :cy="p.y" r="5" class="dot dg" />
                         </g>
 
+                        <!-- blue -->
                         <polyline :points="toPoints(salidas)" class="line b" />
                         <g>
                             <circle v-for="(p,i) in salidasPts" :key="'eb'+i" :cx="p.x" :cy="p.y" r="5" class="dot db" />
@@ -107,6 +110,7 @@
             </div>
         </div>
 
+        <!-- Bottom -->
         <div class="bottom">
             <div class="card">
                 <div class="card-head">
