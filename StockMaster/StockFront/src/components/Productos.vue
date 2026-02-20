@@ -56,6 +56,11 @@
 						<div class="actions-h">Acciones</div>
 					</div>
 
+					<!-- ✅ si no hay data real -->
+					<div v-if="!loading && filteredRows.length === 0" class="empty">
+						No hay productos. Crea uno con “Nuevo Producto”.
+					</div>
+
 					<div class="trow" v-for="p in visibleRows" :key="rowKey(p)">
 						<div class="code">{{ p.codigo }}</div>
 
@@ -64,7 +69,6 @@
 							<div class="pdesc">{{ p.descripcion }}</div>
 						</div>
 
-						<!-- ✅ categoria y proveedor son objetos -->
 						<div class="muted">{{ categoriaNombre(p) }}</div>
 						<div class="muted">{{ proveedorNombre(p) }}</div>
 
@@ -123,16 +127,15 @@
 							<textarea v-model.trim="form.descripcion" rows="4"></textarea>
 						</div>
 
-						<!-- ✅ tu API usa idCategoria / idProveedor -->
 						<div class="grid2">
 							<div class="field">
 								<label>ID Categoría</label>
-								<input type="number" min="0" step="1" v-model.number="form.idCategoria" />
+								<input type="number" min="1" step="1" v-model.number="form.idCategoria" />
 							</div>
 
 							<div class="field">
 								<label>ID Proveedor</label>
-								<input type="number" min="0" step="1" v-model.number="form.idProveedor" />
+								<input type="number" min="1" step="1" v-model.number="form.idProveedor" />
 							</div>
 						</div>
 
@@ -184,13 +187,14 @@
 	const search = ref("");
 	const isOpen = ref(false);
 	const saving = ref(false);
+	const loading = ref(false);
 	const apiError = ref("");
 
 	const viewAll = ref(false);
 	const pageSize = 3;
 
 	const mode = ref("create"); // "create" | "edit"
-	const editingIdProducto = ref(null); // ✅ idProducto real
+	const editingIdProducto = ref(null);
 
 	const rows = ref([]);
 
@@ -211,49 +215,32 @@
 	onMounted(loadProducts);
 
 	async function loadProducts() {
+		loading.value = true;
+		apiError.value = "";
 		try {
 			const res = await fetch(PRODUCTS_ENDPOINT);
-			if (!res.ok) throw new Error(`GET productos falló (${res.status})`);
+			if (!res.ok) throw new Error(`GET /api/Productos falló (${res.status})`);
+
 			const data = await res.json();
-
 			const list = Array.isArray(data) ? data : (data?.items ?? []);
-			rows.value = list;
 
-			if (rows.value.length === 0) seedFallback();
-		} catch {
-			seedFallback();
+			rows.value = list;
+		} catch (e) {
+			rows.value = [];
+			apiError.value = e?.message ?? "No se pudo cargar productos desde la API.";
+		} finally {
+			loading.value = false;
 		}
 	}
 
-	// fallback visual (solo UI)
-	function seedFallback() {
-		rows.value = [
-			{
-				idProducto: null,
-				codigo: "TEC-001",
-				nombre: "Teclado Inalámbrico",
-				descripcion: "Teclado inalámbrico ergonómico",
-				idCategoria: 0,
-				idProveedor: 0,
-				precioCompra: 25.0,
-				precioVenta: 45.0,
-				stockActual: 23,
-				stockMinimo: 27,
-				categoria: { nombre: "Accesorios de Cómputo" },
-				proveedor: { nombreEmpresa: "Tech Solutions" },
-			},
-		];
-	}
-
-	// ✅ key estable: idProducto
 	function rowKey(p) {
 		return String(p?.idProducto ?? p?.codigo ?? Math.random());
 	}
 
-	// helpers para mostrar nombres
 	function categoriaNombre(p) {
 		return p?.categoria?.nombre ?? (p?.idCategoria ? `ID ${p.idCategoria}` : "");
 	}
+
 	function proveedorNombre(p) {
 		return p?.proveedor?.nombreEmpresa ?? (p?.idProveedor ? `ID ${p.idProveedor}` : "");
 	}
@@ -306,24 +293,7 @@
 
 		const id = p?.idProducto ?? null;
 		if (!id) {
-			apiError.value = "Este registro no tiene 'idProducto'. Verifica que el GET /api/Productos devuelva idProducto.";
-			mode.value = "edit";
-			editingIdProducto.value = null;
-
-			// igual abre el modal para que veas datos, pero no podrá guardar
-			Object.assign(form, emptyForm(), {
-				idProducto: null,
-				codigo: p.codigo ?? "",
-				nombre: p.nombre ?? "",
-				descripcion: p.descripcion ?? "",
-				idCategoria: Number(p.idCategoria ?? 0),
-				idProveedor: Number(p.idProveedor ?? 0),
-				precioCompra: Number(p.precioCompra ?? 0),
-				precioVenta: Number(p.precioVenta ?? 0),
-				stockActual: Number(p.stockActual ?? 0),
-				stockMinimo: Number(p.stockMinimo ?? 0),
-			});
-			isOpen.value = true;
+			apiError.value = "Este registro no tiene idProducto. Si lo ves, viene de datos no persistidos.";
 			return;
 		}
 
@@ -400,16 +370,26 @@
 				if (!res.ok) throw await readApiError(res);
 
 				let created = null;
-				try { created = await res.json(); } catch { created = payload; }
+				try {
+					created = await res.json();
+				} catch {
+					created = null;
+				}
 
-				rows.value.unshift(created ?? payload);
+				// si API no devuelve el objeto, recargamos lista
+				if (!created || !created.idProducto) {
+					await loadProducts();
+				} else {
+					rows.value.unshift(created);
+				}
+
 				closeModal();
 				return;
 			}
 
-			// EDIT (PUT /api/Productos/{id})
+			// EDIT
 			if (!editingIdProducto.value) {
-				apiError.value = "No hay idProducto para editar (la API debe devolverlo).";
+				apiError.value = "No hay idProducto para editar.";
 				return;
 			}
 
@@ -421,8 +401,19 @@
 			});
 			if (!res.ok) throw await readApiError(res);
 
+			// muchos PUT devuelven 204 No Content: en ese caso recargamos
+			if (res.status === 204) {
+				await loadProducts();
+				closeModal();
+				return;
+			}
+
 			let updated = null;
-			try { updated = await res.json(); } catch { updated = { ...payload, idProducto: editingIdProducto.value }; }
+			try {
+				updated = await res.json();
+			} catch {
+				updated = { ...payload, idProducto: editingIdProducto.value };
+			}
 
 			const idx = rows.value.findIndex((r) => Number(r?.idProducto) === Number(editingIdProducto.value));
 			if (idx !== -1) rows.value[idx] = { ...rows.value[idx], ...updated, ...payload };
@@ -440,7 +431,7 @@
 		const name = p?.nombre ?? p?.codigo ?? "este producto";
 
 		if (!id) {
-			alert("Este registro no tiene idProducto. DELETE requiere /api/Productos/{id}.");
+			alert("Este registro no tiene idProducto. No se puede eliminar.");
 			return;
 		}
 
@@ -815,8 +806,7 @@
 			color: #64748b;
 		}
 
-		.field input,
-		.field textarea {
+		.field input, .field textarea {
 			width: 100%;
 			box-sizing: border-box;
 			border: 1px solid rgba(148,163,184,.55);
@@ -833,8 +823,7 @@
 			min-height: 110px;
 		}
 
-			.field input:focus,
-			.field textarea:focus {
+			.field input:focus, .field textarea:focus {
 				border-color: rgba(59,130,246,.65);
 				box-shadow: 0 0 0 3px rgba(59,130,246,.18);
 			}
@@ -879,6 +868,12 @@
 		padding: 10px 12px;
 		border-radius: 10px;
 		font-weight: 700;
+	}
+
+	.empty {
+		padding: 18px 12px;
+		color: #64748b;
+		font-weight: 800;
 	}
 
 	@media (max-width: 980px) {

@@ -1,11 +1,9 @@
 ﻿<template>
 	<div class="page">
 		<div class="content">
-			
 			<div class="hdr">
 				<div class="hdr-left">
 					<div class="cube">
-						<!-- icono de proveedor -->
 						<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
 							<path d="M4 7h16M7 7v14m10-14v14M6 21h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
 							<path d="M9 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
@@ -20,6 +18,11 @@
 				</button>
 			</div>
 
+			<!-- Error global de carga -->
+			<div v-if="loadError" class="alert">
+				{{ loadError }}
+			</div>
+
 			<!-- Buscador -->
 			<div class="search">
 				<div class="search-ic">
@@ -31,9 +34,17 @@
 				<input v-model="searchQ" class="search-in" placeholder="Buscar proveedores..." />
 			</div>
 
+			<!-- Loading -->
+			<div v-if="loading" class="mutedLine">Cargando proveedores...</div>
+
+			<!-- Empty -->
+			<div v-else-if="filteredProviders.length === 0" class="mutedLine">
+				No hay proveedores para mostrar.
+			</div>
+
 			<!-- Cards -->
-			<div class="grid">
-				<div class="card" v-for="p in filteredProviders" :key="p.id">
+			<div v-else class="grid">
+				<div class="card" v-for="p in filteredProviders" :key="rowKey(p)">
 					<div class="card-top">
 						<div class="tag-ico">
 							<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -72,12 +83,12 @@
 
 					<div class="card-foot">
 						<div class="foot-lbl">Productos Suministrados</div>
-						<div class="foot-num">{{ p.productosSuministrados }}</div>
+						<div class="foot-num">{{ p.productosSuministrados ?? 0 }}</div>
 					</div>
 				</div>
 			</div>
 
-			<!-- MODAL (panel derecho como en la imagen) -->
+			<!-- DRAWER -->
 			<div v-if="isOpen" class="overlay" @click.self="closeModal">
 				<div class="drawer" role="dialog" aria-modal="true">
 					<div class="drawer-head">
@@ -128,7 +139,7 @@
 					</div>
 				</div>
 			</div>
-			<!-- /MODAL -->
+			<!-- /DRAWER -->
 		</div>
 	</div>
 </template>
@@ -136,48 +147,49 @@
 <script setup>
 	import { computed, onMounted, reactive, ref } from "vue";
 
+	// ✅ AJUSTA si tu backend corre en otro puerto / dominio
 	const API_BASE = "https://localhost:7198";
+
+	// ✅ Según tu Swagger (imagen): /api/Proveedores
 	const PROVIDERS_ENDPOINT = `${API_BASE}/api/Proveedores`;
 
 	const searchQ = ref("");
+	const loading = ref(false);
+	const loadError = ref("");
+
 	const isOpen = ref(false);
 	const saving = ref(false);
 	const apiError = ref("");
 
 	const mode = ref("create"); // create | edit
-	const editingId = ref(null); // idProveedor real
+	const editingIdProveedor = ref(null);
+
 	const providers = ref([]);
 
 	const emptyForm = () => ({
-		idProveedor: null,
 		nombreEmpresa: "",
 		personaContacto: "",
 		email: "",
 		telefono: "",
 		direccion: "",
 	});
-
 	const form = reactive(emptyForm());
 
-	onMounted(async () => {
-		await loadProviders();
-	});
+	onMounted(loadProviders);
+
+	function rowKey(p) {
+		return String(p?.idProveedor ?? p?.nombreEmpresa ?? Math.random());
+	}
 
 	function normalizeProvider(p) {
-		const id = p?.idProveedor ?? p?.id ?? p?.proveedorId ?? null;
-
 		return {
-			...p,
-			id, // id consistente en el front
+			idProveedor: p?.idProveedor ?? null,
 			nombreEmpresa: p?.nombreEmpresa ?? "",
 			personaContacto: p?.personaContacto ?? "",
 			email: p?.email ?? "",
 			telefono: p?.telefono ?? "",
 			direccion: p?.direccion ?? "",
-			// si API no trae conteo, ponemos 0 (o un fallback)
-			productosSuministrados: Number(
-				p?.productosSuministrados ?? p?.totalProductos ?? p?.productCount ?? 0
-			),
+			productosSuministrados: p?.productosSuministrados ?? p?.totalProductos ?? 0,
 		};
 	}
 
@@ -186,50 +198,46 @@
 		return list.map(normalizeProvider);
 	}
 
-	async function loadProviders() {
+	async function readApiError(res) {
+		let text = "";
 		try {
-			const res = await fetch(PROVIDERS_ENDPOINT);
-			if (!res.ok) throw new Error(`GET proveedores falló (${res.status})`);
-			const data = await res.json();
-			providers.value = normalizeList(data);
+			const ct = res.headers.get("content-type") || "";
+			if (ct.includes("application/json")) {
+				const data = await res.json();
+				text =
+					data?.message ||
+					data?.msg ||
+					data?.error ||
+					data?.title ||
+					JSON.stringify(data);
+			} else {
+				text = await res.text();
+			}
+		} catch { /* ignore */ }
 
-			// fallback visual si no viene nada
-			if (providers.value.length === 0) seedFallback();
-		} catch {
-			seedFallback();
-		}
+		const msg = text?.trim()
+			? `${res.status} ${res.statusText}: ${text}`
+			: `${res.status} ${res.statusText}`;
+
+		return new Error(msg);
 	}
 
-	function seedFallback() {
-		providers.value = [
-			normalizeProvider({
-				idProveedor: null,
-				nombreEmpresa: "Tech Solutions",
-				personaContacto: "Juan Pérez",
-				email: "ventas@techsolutions.com",
-				telefono: "+1 555-0123",
-				direccion: "Av. Principal 123, Ciudad",
-				productosSuministrados: 45,
-			}),
-			normalizeProvider({
-				idProveedor: null,
-				nombreEmpresa: "Logitech SA",
-				personaContacto: "Maria Garcia",
-				email: "info@logitech.com",
-				telefono: "+1 555-0456",
-				direccion: "Calle Comercio 456, Ciudad",
-				productosSuministrados: 32,
-			}),
-			normalizeProvider({
-				idProveedor: null,
-				nombreEmpresa: "Ferreteria Central",
-				personaContacto: "Varcia Rodriguez",
-				email: "Carlos Rodige +1",
-				telefono: "+1 555-0789",
-				direccion: "Zona Industrial 789, Ciudad",
-				productosSuministrados: 78,
-			}),
-		];
+	async function loadProviders() {
+		loading.value = true;
+		loadError.value = "";
+		try {
+			const res = await fetch(PROVIDERS_ENDPOINT);
+			if (!res.ok) throw await readApiError(res);
+
+			const data = await res.json();
+			providers.value = normalizeList(data);
+		} catch (e) {
+			// ✅ SIN FALLBACK: solo error
+			loadError.value = e?.message ?? "Failed to fetch (revisa API_BASE, certificado HTTPS o CORS).";
+			providers.value = [];
+		} finally {
+			loading.value = false;
+		}
 	}
 
 	const filteredProviders = computed(() => {
@@ -250,7 +258,7 @@
 	function openCreate() {
 		apiError.value = "";
 		mode.value = "create";
-		editingId.value = null;
+		editingIdProveedor.value = null;
 		Object.assign(form, emptyForm());
 		isOpen.value = true;
 	}
@@ -259,26 +267,23 @@
 		apiError.value = "";
 		mode.value = "edit";
 
-		const id = p?.id ?? null;
+		const id = p?.idProveedor ?? null;
 		if (!id) {
-			apiError.value = "Este registro no tiene 'idProveedor'. No se puede editar/eliminar sin id (PUT/DELETE requieren /{id}).";
-			Object.assign(form, emptyForm(), p);
-			editingId.value = null;
+			apiError.value = "Este registro no tiene 'idProveedor'. La API debe devolver idProveedor para poder editar/eliminar.";
+			editingIdProveedor.value = null;
+			Object.assign(form, emptyForm(), normalizeProvider(p));
 			isOpen.value = true;
 			return;
 		}
 
-		editingId.value = id;
-
+		editingIdProveedor.value = id;
 		Object.assign(form, emptyForm(), {
-			idProveedor: id,
-			nombreEmpresa: p.nombreEmpresa ?? "",
-			personaContacto: p.personaContacto ?? "",
-			email: p.email ?? "",
-			telefono: p.telefono ?? "",
-			direccion: p.direccion ?? "",
+			nombreEmpresa: p?.nombreEmpresa ?? "",
+			personaContacto: p?.personaContacto ?? "",
+			email: p?.email ?? "",
+			telefono: p?.telefono ?? "",
+			direccion: p?.direccion ?? "",
 		});
-
 		isOpen.value = true;
 	}
 
@@ -293,28 +298,14 @@
 		return "";
 	}
 
-	async function readApiError(res) {
-		let msg = `Error (${res.status}).`;
-		try {
-			const data = await res.json();
-			msg = data.message || data.msg || data.error || JSON.stringify(data);
-		} catch { }
-		return new Error(msg);
-	}
-
 	async function saveProvider() {
 		apiError.value = "";
 		const err = validate();
-		if (err) {
-			apiError.value = err;
-			return;
-		}
+		if (err) { apiError.value = err; return; }
 
 		saving.value = true;
 		try {
 			const payload = {
-				// tu modelo tiene estos campos
-				idProveedor: form.idProveedor ?? 0,
 				nombreEmpresa: form.nombreEmpresa,
 				personaContacto: form.personaContacto,
 				email: form.email,
@@ -333,18 +324,26 @@
 
 				let created = null;
 				try { created = await res.json(); } catch { created = payload; }
-				providers.value.unshift(normalizeProvider(created ?? payload));
+
+				// Si la API devuelve el registro (con idProveedor), lo agregamos
+				// Si devuelve vacío, recargamos desde la API
+				if (created && (created.idProveedor || created.nombreEmpresa)) {
+					providers.value.unshift(normalizeProvider(created));
+				} else {
+					await loadProviders();
+				}
+
 				closeModal();
 				return;
 			}
 
 			// EDIT
-			if (!editingId.value) {
-				apiError.value = "No se encontró el idProveedor para editar. Verifica que GET /api/Proveedores devuelva idProveedor.";
+			if (!editingIdProveedor.value) {
+				apiError.value = "No hay idProveedor para editar. Verifica que GET /api/Proveedores devuelva idProveedor.";
 				return;
 			}
 
-			const url = `${PROVIDERS_ENDPOINT}/${encodeURIComponent(editingId.value)}`;
+			const url = `${PROVIDERS_ENDPOINT}/${encodeURIComponent(editingIdProveedor.value)}`;
 			const res = await fetch(url, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
@@ -352,12 +351,22 @@
 			});
 			if (!res.ok) throw await readApiError(res);
 
-			let updated = null;
-			try { updated = await res.json(); } catch { updated = { ...payload, idProveedor: editingId.value }; }
+			// Muchas APIs retornan 204 NoContent: en ese caso recargamos
+			if (res.status === 204) {
+				await loadProviders();
+				closeModal();
+				return;
+			}
 
-			const normalized = normalizeProvider(updated ?? payload);
-			const idx = providers.value.findIndex((x) => (x?.id ?? null) === editingId.value);
-			if (idx !== -1) providers.value[idx] = { ...providers.value[idx], ...normalized };
+			let updated = null;
+			try { updated = await res.json(); } catch { updated = null; }
+
+			if (updated) {
+				const idx = providers.value.findIndex((x) => Number(x?.idProveedor) === Number(editingIdProveedor.value));
+				if (idx !== -1) providers.value[idx] = { ...providers.value[idx], ...normalizeProvider(updated) };
+			} else {
+				await loadProviders();
+			}
 
 			closeModal();
 		} catch (e) {
@@ -368,23 +377,23 @@
 	}
 
 	async function removeProvider(p) {
-		const id = p?.id ?? null;
+		const id = p?.idProveedor ?? null;
 		const name = p?.nombreEmpresa ?? "este proveedor";
 
 		if (!id) {
-			alert("Este registro no tiene 'idProveedor'. No se puede eliminar sin id (DELETE requiere /{id}).");
+			alert("Este registro no tiene 'idProveedor'. DELETE requiere /api/Proveedores/{id}.");
 			return;
 		}
 
-		const ok = confirm(`¿Seguro que deseas eliminar ${name}?`);
-		if (!ok) return;
+		if (!confirm(`¿Seguro que deseas eliminar ${name}?`)) return;
 
 		try {
 			const url = `${PROVIDERS_ENDPOINT}/${encodeURIComponent(id)}`;
 			const res = await fetch(url, { method: "DELETE" });
 			if (!res.ok) throw await readApiError(res);
 
-			providers.value = providers.value.filter((x) => (x?.id ?? null) !== id);
+			// Si devuelve 204, quitamos localmente
+			providers.value = providers.value.filter((x) => Number(x?.idProveedor) !== Number(id));
 		} catch (e) {
 			alert(e?.message ?? "No se pudo eliminar.");
 		}
@@ -392,6 +401,7 @@
 </script>
 
 <style scoped>
+	/* tu mismo CSS, solo agregué .mutedLine */
 	.page {
 		min-height: 100vh;
 		background: #eef3ff;
@@ -401,72 +411,6 @@
 		padding: 18px 22px 28px;
 	}
 
-	/* topbar */
-	.topbar {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 6px 4px 12px;
-		color: #334155;
-	}
-
-	.crumb {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		font-weight: 800;
-	}
-
-	.grid-ico {
-		width: 28px;
-		height: 28px;
-		display: grid;
-		place-items: center;
-		color: #2563eb;
-	}
-
-	.topbar-right {
-		display: flex;
-		align-items: center;
-		gap: 14px;
-	}
-
-	.icon-top {
-		border: 0;
-		background: transparent;
-		cursor: pointer;
-		font-size: 16px;
-		opacity: .8;
-	}
-
-	.user {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 8px 10px;
-		border-radius: 999px;
-		background: rgba(255,255,255,.8);
-		border: 1px solid rgba(15,23,42,.06);
-	}
-
-	.avatar {
-		width: 28px;
-		height: 28px;
-		border-radius: 999px;
-		display: grid;
-		place-items: center;
-		background: rgba(59,130,246,.12);
-	}
-
-	.user-name {
-		font-weight: 800;
-	}
-
-	.caret {
-		opacity: .65;
-	}
-
-	/* header */
 	.hdr {
 		display: flex;
 		align-items: center;
@@ -503,7 +447,6 @@
 		color: #0f172a;
 	}
 
-	/* button */
 	.btn-primary {
 		border: 0;
 		cursor: pointer;
@@ -526,7 +469,6 @@
 		font-weight: 900;
 	}
 
-	/* search */
 	.search {
 		height: 48px;
 		display: flex;
@@ -561,7 +503,12 @@
 		color: #0f172a;
 	}
 
-	/* cards grid */
+	.mutedLine {
+		color: #64748b;
+		font-weight: 800;
+		padding: 10px 2px;
+	}
+
 	.grid {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -682,7 +629,6 @@
 		font-weight: 900;
 	}
 
-	/* drawer modal */
 	.overlay {
 		position: fixed;
 		inset: 0;
@@ -754,8 +700,7 @@
 		font-size: 18px;
 	}
 
-	.field input,
-	.field textarea {
+	.field input, .field textarea {
 		width: 100%;
 		box-sizing: border-box;
 		border: 1px solid rgba(148,163,184,.55);
@@ -771,8 +716,7 @@
 		min-height: 160px;
 	}
 
-		.field input:focus,
-		.field textarea:focus {
+		.field input:focus, .field textarea:focus {
 			border-color: rgba(59,130,246,.65);
 			box-shadow: 0 0 0 3px rgba(59,130,246,.18);
 		}
@@ -822,7 +766,6 @@
 		font-weight: 700;
 	}
 
-	/* responsive */
 	@media (max-width: 1100px) {
 		.grid {
 			grid-template-columns: 1fr;

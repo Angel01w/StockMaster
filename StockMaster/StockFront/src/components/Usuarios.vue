@@ -5,7 +5,6 @@
 			<div class="hdr">
 				<div class="hdr-left">
 					<div class="cube">
-						<!-- icon users -->
 						<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
 							<path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0Z"
 								  stroke="currentColor"
@@ -24,6 +23,9 @@
 					Nuevo Usuario
 				</button>
 			</div>
+
+			<!-- LOAD ERROR -->
+			<div v-if="loadError" class="alert">{{ loadError }}</div>
 
 			<!-- SEARCH -->
 			<div class="search">
@@ -56,7 +58,10 @@
 
 			<!-- TABLE CARD -->
 			<div class="card">
-				<div class="table">
+				<div v-if="loading" class="mutedLine">Cargando usuarios...</div>
+				<div v-else-if="filteredRows.length === 0" class="mutedLine">No hay usuarios para mostrar.</div>
+
+				<div v-else class="table">
 					<div class="thead usersHead">
 						<div>Usuario</div>
 						<div>Email</div>
@@ -78,7 +83,7 @@
 						</div>
 
 						<!-- Email -->
-						<div class="muted">{{ u.email ?? "-" }}</div>
+						<div class="muted">{{ (u.correo ?? u.email) ?? "-" }}</div>
 
 						<!-- Rol -->
 						<div>
@@ -92,6 +97,10 @@
 						<div class="state">
 							<span class="sDot" :class="isActive(u) ? 'on' : 'off'"></span>
 							<span class="muted2">{{ isActive(u) ? "Activo" : "Inactivo" }}</span>
+
+							<button class="miniBtn" type="button" @click="toggleEstado(u)">
+								{{ isActive(u) ? "Desactivar" : "Activar" }}
+							</button>
 						</div>
 
 						<!-- Último acceso -->
@@ -100,6 +109,7 @@
 						<!-- Acciones -->
 						<div class="actions">
 							<button class="icon-btn edit" type="button" title="Editar" aria-label="Editar" @click="openEdit(u)">✎</button>
+							<button class="icon-btn key" type="button" title="Cambiar password" aria-label="Cambiar password" @click="openPassword(u)">🔑</button>
 							<button class="icon-btn del" type="button" title="Eliminar" aria-label="Eliminar" @click="removeUser(u)">🗑</button>
 						</div>
 					</div>
@@ -114,7 +124,7 @@
 				</div>
 			</div>
 
-			<!-- MODAL -->
+			<!-- MODAL CREATE/EDIT -->
 			<div v-if="isOpen" class="modalOverlay" @click.self="closeModal">
 				<div class="modal" role="dialog" aria-modal="true">
 					<div class="modalHead">
@@ -125,458 +135,644 @@
 					<div class="modalBody">
 						<div v-if="apiError" class="alert">{{ apiError }}</div>
 
-						<div class="field">
-							<label>Nombre Completo</label>
-							<input v-model.trim="form.nombreCompleto" autocomplete="off" />
+						<div class="grid2">
+							<div class="field">
+								<label>Nombres</label>
+								<input v-model.trim="form.nombres" autocomplete="off" />
+							</div>
+							<div class="field">
+								<label>Apellidos</label>
+								<input v-model.trim="form.apellidos" autocomplete="off" />
+							</div>
 						</div>
 
 						<div class="field">
-							<label>Email</label>
-							<input v-model.trim="form.email" autocomplete="off" />
+							<label>Correo</label>
+							<input v-model.trim="form.correo" autocomplete="off" />
 						</div>
 
-						<div class="field">
-							<label>Rol</label>
-							<select v-model="form.idRol">
-								<option :value="null" disabled>Seleccione un rol</option>
-								<option v-for="r in roles" :key="String(r.id)" :value="r.id">
-									{{ r.nombre }}
-								</option>
-							</select>
+						<div class="grid2">
+							<div class="field">
+								<label>Rol</label>
+								<select v-model.number="form.idRol" :disabled="rolesLoading">
+									<option :value="null" disabled>
+										{{ rolesLoading ? "Cargando roles..." : "Seleccione un rol" }}
+									</option>
+
+									<option v-for="r in roles" :key="String(r.idRol)" :value="r.idRol">
+										{{ r.nombre }}
+									</option>
+								</select>
+
+								<!-- Mensaje útil si el endpoint devolvió 200 pero sin roles (o mapeo incorrecto) -->
+								<div v-if="!rolesLoading && rolesLoadedOnce && roles.length === 0" class="hint">
+									No hay roles registrados en la base de datos (api/Roles devolvió vacío).
+								</div>
+							</div>
+
+							<div class="field">
+								<label>Estado</label>
+								<select v-model="form.estado">
+									<option value="Activo">Activo</option>
+									<option value="Inactivo">Inactivo</option>
+								</select>
+							</div>
 						</div>
 
-						<div class="field">
-							<label>Estado</label>
-							<select v-model="form.estado">
-								<option value="Activo">Activo</option>
-								<option value="Inactivo">Inactivo</option>
-							</select>
+						<!-- password solo en create -->
+						<div v-if="mode === 'create'" class="grid2">
+							<div class="field">
+								<label>Contraseña</label>
+								<input v-model.trim="form.contrasena" type="password" autocomplete="new-password" />
+							</div>
+							<div class="field">
+								<label>Confirmar</label>
+								<input v-model.trim="form.contrasena2" type="password" autocomplete="new-password" />
+							</div>
 						</div>
 					</div>
 
 					<div class="modalFoot">
 						<button class="btnLink" type="button" @click="closeModal">Cancelar</button>
 
-						<button class="btnPrimary" type="button" :disabled="saving" @click="saveUser">
+						<button class="btnPrimary" type="button" :disabled="saving || rolesLoading" @click="saveUser">
 							{{ saving ? (mode === "create" ? "Creando..." : "Guardando...") : (mode === "create" ? "Crear Usuario" : "Guardar Cambios") }}
 						</button>
 					</div>
 				</div>
 			</div>
 			<!-- /MODAL -->
+			<!-- MODAL PASSWORD -->
+			<div v-if="isPwdOpen" class="modalOverlay" @click.self="closePwd">
+				<div class="modal" role="dialog" aria-modal="true">
+					<div class="modalHead">
+						<div class="modalTitle">Cambiar Password</div>
+						<button class="xBtn" type="button" @click="closePwd" aria-label="Cerrar">×</button>
+					</div>
+
+					<div class="modalBody">
+						<div v-if="pwdError" class="alert">{{ pwdError }}</div>
+
+						<div class="field">
+							<label>Usuario</label>
+							<input :value="pwdUserLabel" disabled />
+						</div>
+
+						<div class="grid2">
+							<div class="field">
+								<label>Nueva contraseña</label>
+								<input v-model.trim="pwdForm.password" type="password" autocomplete="new-password" />
+							</div>
+							<div class="field">
+								<label>Confirmar</label>
+								<input v-model.trim="pwdForm.password2" type="password" autocomplete="new-password" />
+							</div>
+						</div>
+					</div>
+
+					<div class="modalFoot">
+						<button class="btnLink" type="button" @click="closePwd">Cancelar</button>
+						<button class="btnPrimary" type="button" :disabled="pwdSaving" @click="savePassword">
+							{{ pwdSaving ? "Guardando..." : "Guardar Password" }}
+						</button>
+					</div>
+				</div>
+			</div>
+			<!-- /MODAL PASSWORD -->
 		</div>
 	</div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+	import { computed, onMounted, reactive, ref } from "vue";
 
-/** ===== API ===== */
-const API_BASE = "https://localhost:7198";
-const USERS_ENDPOINT = `${API_BASE}/api/Usuarios`;
-const ROLES_ENDPOINT = `${API_BASE}/api/Roles`;
+	/** ===== API ===== */
+	const API_BASE = "https://localhost:7198";
+	const USERS_ENDPOINT = `${API_BASE}/api/Usuarios`;
+	const ROLES_ENDPOINT = `${API_BASE}/api/Roles`;
 
-/** ===== STATE ===== */
-const search = ref("");
-const isOpen = ref(false);
-const saving = ref(false);
-const apiError = ref("");
+	/** ===== STATE ===== */
+	const search = ref("");
+	const isOpen = ref(false);
+	const saving = ref(false);
+	const apiError = ref("");
 
-const viewAll = ref(false);
-const pageSize = 4;
+	const loading = ref(false);
+	const loadError = ref("");
 
-const mode = ref("create"); // create | edit
-const editingId = ref(null);
+	const viewAll = ref(false);
+	const pageSize = 4;
 
-const rows = ref([]);
-const roles = ref([]);
+	const mode = ref("create"); // create | edit
+	const editingId = ref(null);
 
-/** ===== FORM ===== */
-const emptyForm = () => ({
-  id: null,
-  nombreCompleto: "",
-  email: "",
-  idRol: null,
-  estado: "Activo",
-});
-const form = reactive(emptyForm());
+	const rows = ref([]);
+	const roles = ref([]);
 
-onMounted(async () => {
-  await Promise.all([loadRoles(), loadUsers()]);
-});
+	/** roles loading state (para UX) */
+	const rolesLoading = ref(false);
+	const rolesLoadedOnce = ref(false);
 
-/** ===== NORMALIZERS ===== */
-function normalizeRole(r) {
-  return {
-    ...r,
-    id: r?.id ?? r?.idRol ?? r?.rolId ?? r?.roleId ?? null,
-    nombre: r?.nombre ?? r?.name ?? r?.descripcion ?? "Rol",
-  };
-}
+	/** ===== PASSWORD MODAL ===== */
+	const isPwdOpen = ref(false);
+	const pwdSaving = ref(false);
+	const pwdError = ref("");
+	const pwdUserId = ref(null);
+	const pwdUserLabel = ref("");
+	const pwdForm = reactive({ password: "", password2: "" });
 
-function normalizeUser(u) {
-  const id = u?.id ?? u?.idUsuario ?? u?.usuarioId ?? u?.userId ?? null;
+	/** ===== FORM ===== */
+	const emptyForm = () => ({
+		idUsuario: null,
+		nombres: "",
+		apellidos: "",
+		correo: "",
+		idRol: null,
+		estado: "Activo",
+		contrasena: "",
+		contrasena2: "",
+	});
+	const form = reactive(emptyForm());
 
-  // rol puede venir como string, objeto, o idRol
-  const roleObj = u?.rol ?? u?.role ?? u?.roles ?? null;
-  const roleName =
-    typeof roleObj === "string"
-      ? roleObj
-      : (roleObj?.nombre ?? roleObj?.name ?? null);
+	onMounted(async () => {
+		await loadAll();
+	});
 
-  const idRol = u?.idRol ?? u?.rolId ?? roleObj?.idRol ?? roleObj?.id ?? null;
+	/** ===== NORMALIZERS ===== */
+	function normalizeRole(r) {
+		// ✅ FIX: tu DB/Swagger puede devolver IdRole / idRole / idRol / IdRol
+		const idRol =
+			r?.idRol ??
+			r?.idRole ??
+			r?.IdRol ??
+			r?.IdRole ??
+			r?.id ??
+			r?.rolId ??
+			r?.roleId ??
+			null;
 
-  const nombreCompleto =
-    u?.nombreCompleto ??
-    u?.nombre ??
-    u?.nombres ??
-    u?.fullName ??
-    u?.username ??
-    "Usuario";
+		const nombre =
+			r?.nombre ??
+			r?.name ??
+			r?.descripcion ??
+			r?.Nombre ??
+			r?.Description ??
+			"";
 
-  const email = u?.email ?? u?.correo ?? u?.mail ?? null;
+		return { ...r, idRol, nombre };
+	}
 
-  const estadoRaw = u?.estado ?? u?.isActive ?? u?.activo ?? u?.active ?? null;
-  const estado =
-    typeof estadoRaw === "boolean"
-      ? (estadoRaw ? "Activo" : "Inactivo")
-      : (String(estadoRaw ?? "Activo"));
+	function normalizeUser(u) {
+		const idUsuario = u?.idUsuario ?? u?.id ?? u?.usuarioId ?? u?.userId ?? null;
 
-  const ultimoAcceso =
-    u?.ultimoAcceso ?? u?.lastAccess ?? u?.lastLogin ?? u?.fechaUltimoAcceso ?? null;
+		const nombres = u?.nombres ?? u?.nombre ?? u?.firstName ?? "";
+		const apellidos = u?.apellidos ?? u?.apellido ?? u?.lastName ?? "";
 
-  return {
-    ...u,
-    id,
-    nombreCompleto,
-    email,
-    idRol,
-    rolNombre: roleName,
-    estado,
-    ultimoAcceso,
-  };
-}
+		const nombreCompleto =
+			u?.nombreCompleto ??
+			u?.fullName ??
+			`${nombres} ${apellidos}`.trim();
 
-function normalizeList(data) {
-  const list = Array.isArray(data) ? data : (data?.items ?? []);
-  return list;
-}
+		const correo = u?.correo ?? u?.email ?? u?.mail ?? null;
 
-/** ===== LOADERS ===== */
-async function loadRoles() {
-  try {
-    const res = await fetch(ROLES_ENDPOINT);
-    if (!res.ok) throw new Error(`GET roles falló (${res.status})`);
-    const data = await res.json();
-    roles.value = normalizeList(data).map(normalizeRole);
-    if (roles.value.length === 0) seedRolesFallback();
-  } catch {
-    seedRolesFallback();
-  }
-}
+		const idRol =
+			u?.idRol ??
+			u?.idRole ??
+			u?.IdRol ??
+			u?.IdRole ??
+			u?.rolId ??
+			u?.roleId ??
+			u?.rol?.idRol ??
+			u?.rol?.idRole ??
+			u?.rol?.IdRol ??
+			u?.rol?.IdRole ??
+			u?.rol?.id ??
+			null;
 
-async function loadUsers() {
-  try {
-    const res = await fetch(USERS_ENDPOINT);
-    if (!res.ok) throw new Error(`GET usuarios falló (${res.status})`);
-    const data = await res.json();
-    rows.value = normalizeList(data).map(normalizeUser);
-    if (rows.value.length === 0) seedUsersFallback();
-  } catch {
-    seedUsersFallback();
-  }
-}
+		// estado puede venir: "Activo"/"Inactivo", bool, 0/1
+		const estadoRaw = u?.estado ?? u?.activo ?? u?.isActive ?? u?.active ?? null;
+		const estadoStr = String(estadoRaw ?? "").toLowerCase();
 
-/** ===== FALLBACKS (solo UI) ===== */
-function seedRolesFallback() {
-  roles.value = [
-    { id: 1, nombre: "Administrador" },
-    { id: 2, nombre: "Usuario" },
-    { id: 3, nombre: "Auditor" },
-  ];
-}
+		const activoBool =
+			typeof estadoRaw === "boolean"
+				? estadoRaw
+				: estadoStr === "activo" || estadoStr === "true" || estadoStr === "1";
 
-function seedUsersFallback() {
-  rows.value = [
-    {
-      id: null,
-      nombreCompleto: "Admin",
-      email: "admin@stockmaster.com",
-      idRol: 1,
-      rolNombre: "Administrador",
-      estado: "Activo",
-      ultimoAcceso: "2024-04-25",
-    },
-    {
-      id: null,
-      nombreCompleto: "Jose Martinez",
-      email: "jose@stockmaster.com",
-      idRol: 2,
-      rolNombre: "Usuario",
-      estado: "Activo",
-      ultimoAcceso: "2024-04-25",
-    },
-    {
-      id: null,
-      nombreCompleto: "Ana López",
-      email: "ana@stockmaster.com",
-      idRol: 2,
-      rolNombre: "Usuario",
-      estado: "Activo",
-      ultimoAcceso: "2024-04-24",
-    },
-    {
-      id: null,
-      nombreCompleto: "Carlos Gómez",
-      email: "carlos@stockmaster.com",
-      idRol: 3,
-      rolNombre: "Auditor",
-      estado: "Activo",
-      ultimoAcceso: "2024-04-23",
-    },
-  ];
-}
+		const ultimoAcceso =
+			u?.ultimoAcceso ?? u?.lastAccess ?? u?.lastLogin ?? u?.fechaUltimoAcceso ?? null;
 
-/** ===== UI HELPERS ===== */
-function rowKey(u) {
-  return String(u?.id ?? u?.email ?? u?.nombreCompleto ?? Math.random());
-}
+		const rolNombre =
+			(typeof u?.rol === "string" ? u.rol : (u?.rol?.nombre ?? u?.rol?.name ?? u?.rol?.Nombre)) ??
+			u?.rolNombre ??
+			null;
 
-const filteredRows = computed(() => {
-  const q = search.value.trim().toLowerCase();
-  if (!q) return rows.value;
-  return rows.value.filter((u) => {
-    return (
-      String(u.nombreCompleto ?? "").toLowerCase().includes(q) ||
-      String(u.email ?? "").toLowerCase().includes(q) ||
-      String(roleName(u) ?? "").toLowerCase().includes(q) ||
-      String(u.estado ?? "").toLowerCase().includes(q)
-    );
-  });
-});
+		return {
+			...u,
+			idUsuario,
+			nombres,
+			apellidos,
+			nombreCompleto,
+			correo,
+			idRol,
+			rolNombre,
+			activo: activoBool,
+			estado: activoBool ? "Activo" : "Inactivo",
+			ultimoAcceso,
+		};
+	}
 
-const visibleRows = computed(() => {
-  if (viewAll.value) return filteredRows.value;
-  return filteredRows.value.slice(0, pageSize);
-});
+	function normalizeList(data) {
+		// soporta: []  |  {items:[...]}  |  {data:[...]}  |  {result:[...]}
+		if (Array.isArray(data)) return data;
+		if (Array.isArray(data?.items)) return data.items;
+		if (Array.isArray(data?.data)) return data.data;
+		if (Array.isArray(data?.result)) return data.result;
+		return [];
+	}
 
-function toggleViewAll() {
-  viewAll.value = !viewAll.value;
-}
+	/** ===== HTTP HELPERS ===== */
+	async function readApiError(res) {
+		let text = "";
+		try {
+			const ct = res.headers.get("content-type") || "";
+			if (ct.includes("application/json")) {
+				const data = await res.json();
+				text =
+					data?.message ||
+					data?.msg ||
+					data?.error ||
+					data?.title ||
+					(data?.errors ? JSON.stringify(data.errors) : "") ||
+					JSON.stringify(data);
+			} else {
+				text = await res.text();
+			}
+		} catch { }
 
-function roleName(u) {
-  // prioridad: rolNombre ya normalizado > lookup por idRol
-  if (u?.rolNombre) return u.rolNombre;
-  const r = roles.value.find((x) => x.id === u?.idRol);
-  return r?.nombre ?? "Usuario";
-}
+		const msg = text?.trim()
+			? `${res.status} ${res.statusText}: ${text}`
+			: `${res.status} ${res.statusText}`;
 
-function isActive(u) {
-  const s = String(u?.estado ?? "Activo").toLowerCase();
-  return s === "activo" || s === "true" || s === "1";
-}
+		return new Error(msg);
+	}
 
-function lastAccess(u) {
-  return u?.ultimoAcceso ? String(u.ultimoAcceso).slice(0, 10) : "-";
-}
+	/** ===== LOADERS ===== */
+	async function loadAll() {
+		loading.value = true;
+		loadError.value = "";
+		try {
+			await Promise.all([loadRoles(), loadUsers()]);
+		} catch (e) {
+			loadError.value = e?.message ?? "Error cargando datos.";
+		} finally {
+			loading.value = false;
+		}
+	}
 
-function displayName(u) {
-  return u?.nombreCompleto ?? "Usuario";
-}
+	async function loadRoles() {
+		rolesLoading.value = true;
+		rolesLoadedOnce.value = true;
 
-function avatarLetter(u) {
-  const name = displayName(u).trim();
-  return name ? name[0].toUpperCase() : "U";
-}
+		const res = await fetch(ROLES_ENDPOINT);
+		if (!res.ok) {
+			rolesLoading.value = false;
+			throw await readApiError(res);
+		}
 
-function avatarClass(u) {
-  // alterna colores como la imagen (morado/azul)
-  const n = (displayName(u).length + (u?.email?.length ?? 0)) % 2;
-  return n === 0 ? "av-purple" : "av-blue";
-}
+		const data = await res.json();
+		const list = normalizeList(data).map(normalizeRole);
 
-function roleChipClass(u) {
-  const rn = roleName(u).toLowerCase();
-  if (rn.includes("admin")) return "chip-admin";
-  if (rn.includes("audit")) return "chip-auditor";
-  return "chip-user";
-}
+		// ✅ FIX: no “parece vacío” por mapeo, y no se cuelan nulls
+		roles.value = list.filter((x) => x.idRol != null);
 
-/** ===== KPIs ===== */
-const totalUsuarios = computed(() => rows.value.length);
+		rolesLoading.value = false;
+	}
 
-const totalAdmins = computed(() =>
-  rows.value.reduce((acc, u) => acc + (roleName(u).toLowerCase().includes("admin") ? 1 : 0), 0)
-);
+	async function loadUsers() {
+		const res = await fetch(USERS_ENDPOINT);
+		if (!res.ok) throw await readApiError(res);
+		const data = await res.json();
+		rows.value = normalizeList(data).map(normalizeUser);
+	}
 
-const totalActivos = computed(() =>
-  rows.value.reduce((acc, u) => acc + (isActive(u) ? 1 : 0), 0)
-);
+	/** ===== UI HELPERS ===== */
+	function rowKey(u) {
+		return String(u?.idUsuario ?? u?.correo ?? u?.nombreCompleto ?? Math.random());
+	}
 
-const totalAuditores = computed(() =>
-  rows.value.reduce((acc, u) => acc + (roleName(u).toLowerCase().includes("audit") ? 1 : 0), 0)
-);
+	const filteredRows = computed(() => {
+		const q = search.value.trim().toLowerCase();
+		if (!q) return rows.value;
+		return rows.value.filter((u) => {
+			return (
+				String(displayName(u)).toLowerCase().includes(q) ||
+				String(u.correo ?? "").toLowerCase().includes(q) ||
+				String(roleName(u) ?? "").toLowerCase().includes(q) ||
+				String(u.estado ?? "").toLowerCase().includes(q)
+			);
+		});
+	});
 
-/** ===== MODAL ACTIONS ===== */
-function openCreate() {
-  apiError.value = "";
-  mode.value = "create";
-  editingId.value = null;
-  Object.assign(form, emptyForm(), {
-    idRol: roles.value?.[1]?.id ?? roles.value?.[0]?.id ?? null,
-  });
-  isOpen.value = true;
-}
+	const visibleRows = computed(() => {
+		if (viewAll.value) return filteredRows.value;
+		return filteredRows.value.slice(0, pageSize);
+	});
 
-function openEdit(u) {
-  apiError.value = "";
+	function toggleViewAll() {
+		viewAll.value = !viewAll.value;
+	}
 
-  const id = u?.id ?? null;
-  if (!id) {
-    apiError.value = "Este registro no tiene 'idUsuario'. La API debe devolverlo para poder editar/eliminar.";
-  }
+	function roleName(u) {
+		if (u?.rolNombre) return u.rolNombre;
+		const r = roles.value.find((x) => Number(x.idRol) === Number(u?.idRol));
+		return r?.nombre ?? "-";
+	}
 
-  mode.value = "edit";
-  editingId.value = id;
+	function isActive(u) {
+		return Boolean(u?.activo ?? (String(u?.estado ?? "").toLowerCase() === "activo"));
+	}
 
-  Object.assign(form, emptyForm(), {
-    id,
-    nombreCompleto: u?.nombreCompleto ?? "",
-    email: u?.email ?? "",
-    idRol: u?.idRol ?? (roles.value?.[0]?.id ?? null),
-    estado: isActive(u) ? "Activo" : "Inactivo",
-  });
+	function lastAccess(u) {
+		return u?.ultimoAcceso ? String(u.ultimoAcceso).slice(0, 10) : "-";
+	}
 
-  isOpen.value = true;
-}
+	/** ✅ FIX: sin mezclar ?? con || */
+	function displayName(u) {
+		const byFull = u?.nombreCompleto ?? u?.fullName ?? null;
+		if (byFull && String(byFull).trim()) return String(byFull).trim();
 
-function closeModal() {
-  isOpen.value = false;
-}
+		const nombres = u?.nombres ?? "";
+		const apellidos = u?.apellidos ?? "";
+		const combined = `${nombres} ${apellidos}`.trim();
 
-/** ===== VALIDATION ===== */
-function validate() {
-  if (!form.nombreCompleto) return "Nombre Completo es obligatorio.";
-  if (!form.email) return "Email es obligatorio.";
-  if (!form.idRol) return "Debes seleccionar un Rol.";
-  // validación simple email
-  if (!/^\S+@\S+\.\S+$/.test(form.email)) return "Email inválido.";
-  return "";
-}
+		return combined || "Usuario";
+	}
 
-async function readApiError(res) {
-  let msg = `Error (${res.status}).`;
-  try {
-    const data = await res.json();
-    msg = data.message || data.msg || data.error || JSON.stringify(data);
-  } catch {}
-  return new Error(msg);
-}
+	function avatarLetter(u) {
+		const name = displayName(u).trim();
+		return name ? name[0].toUpperCase() : "U";
+	}
 
-/** ===== API ACTIONS ===== */
-function splitNombre(nombreCompleto) {
-  const parts = String(nombreCompleto ?? "").trim().split(/\s+/);
-  const nombres = parts.slice(0, Math.max(1, parts.length - 1)).join(" ");
-  const apellidos = parts.length > 1 ? parts[parts.length - 1] : "";
-  return { nombres, apellidos };
-}
+	function avatarClass(u) {
+		const n = (displayName(u).length + (u?.correo?.length ?? 0)) % 2;
+		return n === 0 ? "av-purple" : "av-blue";
+	}
 
-async function saveUser() {
-  apiError.value = "";
-  const err = validate();
-  if (err) {
-    apiError.value = err;
-    return;
-  }
+	function roleChipClass(u) {
+		const rn = String(roleName(u)).toLowerCase();
+		if (rn.includes("admin")) return "chip-admin";
+		if (rn.includes("audit")) return "chip-auditor";
+		return "chip-user";
+	}
 
-  saving.value = true;
-  try {
-    const { nombres, apellidos } = splitNombre(form.nombreCompleto);
+	/** ===== KPIs ===== */
+	const totalUsuarios = computed(() => rows.value.length);
+	const totalAdmins = computed(() =>
+		rows.value.reduce((acc, u) => acc + (String(roleName(u)).toLowerCase().includes("admin") ? 1 : 0), 0)
+	);
+	const totalActivos = computed(() =>
+		rows.value.reduce((acc, u) => acc + (isActive(u) ? 1 : 0), 0)
+	);
+	const totalAuditores = computed(() =>
+		rows.value.reduce((acc, u) => acc + (String(roleName(u)).toLowerCase().includes("audit") ? 1 : 0), 0)
+	);
 
-    // Payload “flexible” (manda campos comunes para que tu API tome los que use)
-    const payload = {
-      idRol: Number(form.idRol),
-      estado: form.estado,              // si tu API usa string
-      activo: form.estado === "Activo", // si tu API usa boolean
-      email: form.email,
-      correo: form.email,
+	/** ===== MODAL ACTIONS ===== */
+	function openCreate() {
+		apiError.value = "";
+		mode.value = "create";
+		editingId.value = null;
 
-      nombreCompleto: form.nombreCompleto,
-      nombre: form.nombreCompleto,
-      nombres,
-      apellidos,
-    };
+		Object.assign(form, emptyForm(), {
+			idRol: roles.value?.[0]?.idRol ?? null,
+		});
 
-    // CREATE
-    if (mode.value === "create") {
-      const res = await fetch(USERS_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw await readApiError(res);
+		isOpen.value = true;
+	}
 
-      let created = null;
-      try { created = await res.json(); } catch { created = payload; }
+	function openEdit(u) {
+		apiError.value = "";
+		mode.value = "edit";
 
-      rows.value.unshift(normalizeUser(created ?? payload));
-      closeModal();
-      return;
-    }
+		const id = u?.idUsuario ?? null;
+		if (!id) {
+			apiError.value = "Este registro no tiene idUsuario. La API debe devolverlo para editar/eliminar.";
+		}
+		editingId.value = id;
 
-    // EDIT
-    if (!editingId.value) {
-      apiError.value = "No se encontró idUsuario para editar.";
-      return;
-    }
+		Object.assign(form, emptyForm(), {
+			idUsuario: id,
+			nombres: u?.nombres ?? "",
+			apellidos: u?.apellidos ?? "",
+			correo: u?.correo ?? "",
+			idRol: u?.idRol ?? (roles.value?.[0]?.idRol ?? null),
+			estado: isActive(u) ? "Activo" : "Inactivo",
+		});
 
-    const res = await fetch(`${USERS_ENDPOINT}/${encodeURIComponent(editingId.value)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw await readApiError(res);
+		isOpen.value = true;
+	}
 
-    let updated = null;
-    try { updated = await res.json(); } catch { updated = { ...payload, idUsuario: editingId.value }; }
+	function closeModal() {
+		isOpen.value = false;
+	}
 
-    const normalized = normalizeUser(updated ?? payload);
-    const idx = rows.value.findIndex((x) => (x?.id ?? null) === editingId.value);
-    if (idx !== -1) rows.value[idx] = { ...rows.value[idx], ...normalized };
+	/** ===== VALIDATION ===== */
+	function validate() {
+		if (!form.nombres) return "Nombres es obligatorio.";
+		if (!form.apellidos) return "Apellidos es obligatorio.";
+		if (!form.correo) return "Correo es obligatorio.";
+		if (!form.idRol) return "Debes seleccionar un Rol.";
+		if (!/^\S+@\S+\.\S+$/.test(form.correo)) return "Correo inválido.";
 
-    closeModal();
-  } catch (e) {
-    apiError.value = e?.message ?? "Error guardando el usuario.";
-  } finally {
-    saving.value = false;
-  }
-}
+		if (mode.value === "create") {
+			if (!form.contrasena) return "Contraseña es obligatoria.";
+			if (form.contrasena.length < 6) return "Contraseña debe tener al menos 6 caracteres.";
+			if (form.contrasena !== form.contrasena2) return "Las contraseñas no coinciden.";
+		}
+		return "";
+	}
 
-async function removeUser(u) {
-  const id = u?.id ?? null;
-  const name = displayName(u);
+	/** ===== API ACTIONS ===== */
+	async function saveUser() {
+		apiError.value = "";
+		const err = validate();
+		if (err) { apiError.value = err; return; }
 
-  if (!id) {
-    alert("Este registro no tiene 'idUsuario'. No se puede eliminar sin id.");
-    return;
-  }
+		saving.value = true;
+		try {
+			// Payload “compatible” (tu API tomará lo que necesite)
+			const payload = {
+				idRol: Number(form.idRol),
+				idRole: Number(form.idRol), // por si tu backend usa ese nombre
+				correo: form.correo,
+				email: form.correo,
+				nombres: form.nombres,
+				apellidos: form.apellidos,
+				estado: form.estado,
+				activo: form.estado === "Activo",
+			};
 
-  const ok = confirm(`¿Seguro que deseas eliminar ${name}?`);
-  if (!ok) return;
+			if (mode.value === "create") {
+				payload.contrasena = form.contrasena;
+				payload.password = form.contrasena;
+			}
 
-  try {
-    const res = await fetch(`${USERS_ENDPOINT}/${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (!res.ok) throw await readApiError(res);
+			if (mode.value === "create") {
+				const res = await fetch(USERS_ENDPOINT, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(payload),
+				});
+				if (!res.ok) throw await readApiError(res);
 
-    rows.value = rows.value.filter((x) => (x?.id ?? null) !== id);
-  } catch (e) {
-    alert(e?.message ?? "No se pudo eliminar.");
-  }
-}
+				let created = null;
+				try { created = await res.json(); } catch { created = null; }
+
+				if (created) rows.value.unshift(normalizeUser(created));
+				else await loadUsers();
+
+				closeModal();
+				return;
+			}
+
+			if (!editingId.value) {
+				apiError.value = "No se encontró idUsuario para editar.";
+				return;
+			}
+
+			const res = await fetch(`${USERS_ENDPOINT}/${encodeURIComponent(editingId.value)}`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+			if (!res.ok) throw await readApiError(res);
+
+			let updated = null;
+			try { updated = await res.json(); } catch { updated = null; }
+
+			if (updated) {
+				const n = normalizeUser(updated);
+				const idx = rows.value.findIndex((x) => Number(x?.idUsuario) === Number(editingId.value));
+				if (idx !== -1) rows.value[idx] = { ...rows.value[idx], ...n };
+			} else {
+				await loadUsers();
+			}
+
+			closeModal();
+		} catch (e) {
+			apiError.value = e?.message ?? "Error guardando el usuario.";
+		} finally {
+			saving.value = false;
+		}
+	}
+
+	async function removeUser(u) {
+		const id = u?.idUsuario ?? null;
+		const name = displayName(u);
+
+		if (!id) {
+			alert("Este registro no tiene idUsuario. No se puede eliminar sin id.");
+			return;
+		}
+
+		const ok = confirm(`¿Seguro que deseas eliminar ${name}?`);
+		if (!ok) return;
+
+		try {
+			const res = await fetch(`${USERS_ENDPOINT}/${encodeURIComponent(id)}`, { method: "DELETE" });
+			if (!res.ok) throw await readApiError(res);
+			rows.value = rows.value.filter((x) => Number(x?.idUsuario) !== Number(id));
+		} catch (e) {
+			alert(e?.message ?? "No se pudo eliminar.");
+		}
+	}
+
+	async function toggleEstado(u) {
+		const id = u?.idUsuario ?? null;
+		if (!id) return;
+
+		const newState = !isActive(u);
+
+		try {
+			const res = await fetch(`${USERS_ENDPOINT}/${encodeURIComponent(id)}/estado`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ activo: newState, estado: newState ? "Activo" : "Inactivo" }),
+			});
+			if (!res.ok) throw await readApiError(res);
+
+			let updated = null;
+			try { updated = await res.json(); } catch { updated = null; }
+
+			if (updated) {
+				const n = normalizeUser(updated);
+				const idx = rows.value.findIndex((x) => Number(x?.idUsuario) === Number(id));
+				if (idx !== -1) rows.value[idx] = { ...rows.value[idx], ...n };
+			} else {
+				const idx = rows.value.findIndex((x) => Number(x?.idUsuario) === Number(id));
+				if (idx !== -1) rows.value[idx] = { ...rows.value[idx], activo: newState, estado: newState ? "Activo" : "Inactivo" };
+			}
+		} catch (e) {
+			alert(e?.message ?? "No se pudo cambiar el estado.");
+		}
+	}
+
+	/** ===== PASSWORD ===== */
+	function openPassword(u) {
+		pwdError.value = "";
+		pwdSaving.value = false;
+
+		const id = u?.idUsuario ?? null;
+		if (!id) {
+			alert("Este registro no tiene idUsuario. No se puede cambiar password sin id.");
+			return;
+		}
+
+		pwdUserId.value = id;
+		pwdUserLabel.value = `${displayName(u)} (${(u?.correo ?? u?.email) ?? "-"})`;
+		pwdForm.password = "";
+		pwdForm.password2 = "";
+		isPwdOpen.value = true;
+	}
+
+	function closePwd() {
+		isPwdOpen.value = false;
+	}
+
+	function validatePwd() {
+		if (!pwdForm.password) return "La contraseña es obligatoria.";
+		if (pwdForm.password.length < 6) return "Debe tener al menos 6 caracteres.";
+		if (pwdForm.password !== pwdForm.password2) return "Las contraseñas no coinciden.";
+		return "";
+	}
+
+	async function savePassword() {
+		pwdError.value = "";
+		const err = validatePwd();
+		if (err) { pwdError.value = err; return; }
+
+		const id = pwdUserId.value;
+		if (!id) { pwdError.value = "No hay usuario seleccionado."; return; }
+
+		pwdSaving.value = true;
+		try {
+			const res = await fetch(`${USERS_ENDPOINT}/${encodeURIComponent(id)}/password`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ password: pwdForm.password, contrasena: pwdForm.password }),
+			});
+			if (!res.ok) throw await readApiError(res);
+
+			isPwdOpen.value = false;
+		} catch (e) {
+			pwdError.value = e?.message ?? "No se pudo cambiar el password.";
+		} finally {
+			pwdSaving.value = false;
+		}
+	}
 </script>
 
 <style scoped>
-	/* ===== Layout base (igual estilo que tus vistas) ===== */
 	.page {
 		min-height: 100vh;
 		background: #eef3ff;
@@ -584,6 +780,12 @@ async function removeUser(u) {
 
 	.content {
 		padding: 22px;
+	}
+
+	.mutedLine {
+		color: #64748b;
+		font-weight: 800;
+		padding: 10px 2px;
 	}
 
 	/* ===== Header ===== */
@@ -672,7 +874,7 @@ async function removeUser(u) {
 		color: #0f172a;
 	}
 
-	/* ===== Stats (4) ===== */
+	/* ===== Stats ===== */
 	.stats4 {
 		display: grid;
 		grid-template-columns: repeat(4,minmax(0,1fr));
@@ -766,11 +968,11 @@ async function removeUser(u) {
 	}
 
 	.usersHead {
-		grid-template-columns: 2fr 2fr 1.2fr 1.1fr 1.2fr .7fr;
+		grid-template-columns: 2fr 2fr 1.2fr 1.3fr 1.2fr 1fr;
 	}
 
 	.usersRow {
-		grid-template-columns: 2fr 2fr 1.2fr 1.1fr 1.2fr .7fr;
+		grid-template-columns: 2fr 2fr 1.2fr 1.3fr 1.2fr 1fr;
 	}
 
 	.muted {
@@ -815,7 +1017,11 @@ async function removeUser(u) {
 			color: #ef4444;
 		}
 
-	/* ===== Usuario cell (avatar + name) ===== */
+		.icon-btn.key {
+			color: #7c3aed;
+		}
+
+	/* ===== Usuario cell ===== */
 	.uCell {
 		display: flex;
 		align-items: center;
@@ -901,6 +1107,7 @@ async function removeUser(u) {
 		display: flex;
 		align-items: center;
 		gap: 10px;
+		flex-wrap: wrap;
 	}
 
 	.sDot {
@@ -917,6 +1124,16 @@ async function removeUser(u) {
 		.sDot.off {
 			background: #ef4444;
 		}
+
+	.miniBtn {
+		border: 1px solid rgba(15,23,42,.10);
+		background: rgba(255,255,255,.9);
+		border-radius: 10px;
+		padding: 6px 10px;
+		font-weight: 900;
+		cursor: pointer;
+		color: #334155;
+	}
 
 	/* ===== Footer ===== */
 	.tfoot {
@@ -1007,6 +1224,13 @@ async function removeUser(u) {
 		gap: 14px;
 	}
 
+	.grid2 {
+		display: grid;
+		grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+		column-gap: 22px;
+		row-gap: 14px;
+	}
+
 	.field label {
 		display: block;
 		margin-bottom: 8px;
@@ -1030,6 +1254,17 @@ async function removeUser(u) {
 			border-color: rgba(59,130,246,.65);
 			box-shadow: 0 0 0 3px rgba(59,130,246,.18);
 		}
+
+	.hint {
+		margin-top: 8px;
+		font-weight: 800;
+		color: #b91c1c;
+		background: rgba(239,68,68,.08);
+		border: 1px solid rgba(239,68,68,.25);
+		padding: 8px 10px;
+		border-radius: 10px;
+		font-size: 12px;
+	}
 
 	.modalFoot {
 		padding: 14px 18px 18px;
@@ -1073,7 +1308,6 @@ async function removeUser(u) {
 		font-weight: 700;
 	}
 
-	/* ===== Responsive ===== */
 	@media (max-width: 1100px) {
 		.stats4 {
 			grid-template-columns: 1fr;
@@ -1089,6 +1323,10 @@ async function removeUser(u) {
 
 		.actions {
 			justify-content: flex-start;
+		}
+
+		.grid2 {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

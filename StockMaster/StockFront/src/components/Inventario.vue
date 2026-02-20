@@ -19,10 +19,15 @@
 				</button>
 			</div>
 
+			<!-- Error global -->
+			<div v-if="loadError" class="alert">
+				{{ loadError }}
+			</div>
+
+			<!-- Stats -->
 			<div class="stats">
 				<div class="stat">
 					<div class="stat-ic ic-blue">
-						<!-- cajita -->
 						<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
 							<path d="M4 7h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
 							<path d="M7 7V5.5A2.5 2.5 0 0 1 9.5 3h5A2.5 2.5 0 0 1 17 5.5V7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
@@ -37,7 +42,6 @@
 
 				<div class="stat">
 					<div class="stat-ic ic-green">
-						<!-- flecha arriba -->
 						<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
 							<path d="M12 19V5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
 							<path d="M7 10l5-5 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
@@ -52,7 +56,6 @@
 
 				<div class="stat">
 					<div class="stat-ic ic-red">
-						<!-- flecha abajo -->
 						<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
 							<path d="M12 5v14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
 							<path d="M7 14l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
@@ -66,8 +69,8 @@
 				</div>
 			</div>
 
+			<!-- Tabla -->
 			<div class="card">
-				<!-- toolbar -->
 				<div class="toolbar">
 					<div class="search">
 						<div class="search-ic">
@@ -86,8 +89,10 @@
 					</div>
 				</div>
 
-				<!-- table -->
-				<div class="table">
+				<div v-if="loading" class="mutedLine">Cargando inventario...</div>
+				<div v-else-if="filteredRows.length === 0" class="mutedLine">No hay movimientos para mostrar.</div>
+
+				<div v-else class="table">
 					<div class="thead">
 						<div>Fecha</div>
 						<div>Tipo</div>
@@ -110,7 +115,9 @@
 
 						<div class="prod">{{ m.producto }}</div>
 						<div class="num qty">{{ m.cantidad }}</div>
-						<div class="muted">{{ m.motivo }}</div>
+
+						<!-- ✅ ahora motivo se resuelve aunque el API mande solo idMotivoMovimiento -->
+						<div class="muted">{{ motivoLabel(m) }}</div>
 
 						<div class="doc">
 							<span v-if="m.documento" class="doc-ic">
@@ -177,21 +184,35 @@
 
 						<div class="field">
 							<label>Motivo</label>
-							<select v-model="form.motivo">
-								<option value="" disabled>Seleccione un motivo</option>
-								<option value="Reposición">Reposición</option>
-								<option value="Ajuste de Inventario">Ajuste de Inventario</option>
-								<option value="Devolución">Devolución</option>
-								<option value="Venta">Venta</option>
-								<option value="Otro">Otro</option>
+							<select v-model.number="form.idMotivoMovimiento" :disabled="motivosLoading">
+								<option :value="null" disabled>
+									{{ motivosLoading ? "Cargando motivos..." : "Seleccione un motivo" }}
+								</option>
+
+								<option v-for="mm in motivos" :key="String(mm.idMotivoMovimiento)" :value="mm.idMotivoMovimiento">
+									{{ mm.descripcion }}
+								</option>
 							</select>
+
+							<!-- ✅ mensaje tipo Roles: si el endpoint vino vacío -->
+							<div v-if="!motivosLoading && motivosLoadedOnce && motivos.length === 0" class="miniWarn">
+								No hay motivos registrados en la base de datos (api/MotivosMovimiento devolvió vacío).
+							</div>
+
+							<!-- errores reales (401/500/etc) -->
+							<div v-else-if="motivosError" class="miniWarn">{{ motivosError }}</div>
+						</div>
+
+						<div class="field">
+							<label>Responsable</label>
+							<input v-model.trim="form.responsable" placeholder="Ej: Admin" autocomplete="off" />
 						</div>
 					</div>
 
 					<div class="modalFoot">
 						<button class="btnLink" type="button" @click="closeModal">Cancelar</button>
 
-						<button class="btnPrimary" type="button" :disabled="saving" @click="createMovement">
+						<button class="btnPrimary" type="button" :disabled="saving || motivosLoading" @click="createMovement">
 							{{ saving ? "Registrando..." : "Registrar Movimiento" }}
 						</button>
 					</div>
@@ -203,192 +224,340 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+	import { computed, onMounted, reactive, ref } from "vue";
 
-const API_BASE = "https://localhost:7198";
+	// ✅ AJUSTA si tu backend usa otro server/puerto
+	const API_BASE = "https://localhost:7198";
 
-// ⚠️ AJUSTA ESTO si tu Swagger usa otra ruta:
-const MOV_ENDPOINT = `${API_BASE}/api/Movimientos`;
+	// ✅ según Swagger
+	const MOV_ENDPOINT = `${API_BASE}/api/Movimientos`;
+	const MOTIVOS_ENDPOINT = `${API_BASE}/api/MotivosMovimiento`;
 
-const search = ref("");
-const filterTipo = ref("todos"); // 'todos' | 'entrada' | 'salida'
+	const search = ref("");
+	const filterTipo = ref("todos");
 
-const isOpen = ref(false);
-const saving = ref(false);
-const apiError = ref("");
+	const loading = ref(false);
+	const loadError = ref("");
 
-const rows = ref([]);
+	const isOpen = ref(false);
+	const saving = ref(false);
+	const apiError = ref("");
 
-const emptyForm = () => ({
-	fecha: toDateInputValue(new Date()),
-	tipo: "Entrada",
-	producto: "",
-	cantidad: 0,
-	motivo: "",
-	documento: "",
-	responsable: "Admin",
-});
-const form = reactive(emptyForm());
+	const rows = ref([]);
 
-onMounted(async () => {
-	await loadMovimientos();
-});
+	// motivos desde API
+	const motivos = ref([]);
+	const motivosError = ref("");
 
-async function loadMovimientos() {
-	try {
-		const res = await fetch(MOV_ENDPOINT);
-		if (!res.ok) throw new Error(`GET movimientos falló (${res.status})`);
-		const data = await res.json();
-		const list = Array.isArray(data) ? data : (data?.items ?? []);
-		rows.value = list.map(normalizeMovement);
+	// ✅ estado de carga tipo "Roles"
+	const motivosLoading = ref(false);
+	const motivosLoadedOnce = ref(false);
 
-		if (rows.value.length === 0) seedFallback();
-	} catch {
-		seedFallback();
-	}
-}
-
-function normalizeMovement(m) {
-	if (!m || typeof m !== "object") return m;
-
-	// acepta distintos nombres por si tu API devuelve otros campos
-	const id = m.id ?? m.idMovimiento ?? m.movimientoId ?? m.movId ?? null;
-
-	return {
-		...m,
-		id,
-		fecha: m.fecha ?? m.createdAt ?? m.date ?? m.fechaMovimiento ?? toDateInputValue(new Date()),
-		tipo: (m.tipo ?? m.type ?? "Entrada"),
-		producto: m.producto ?? m.nombreProducto ?? m.productName ?? "",
-		cantidad: Number(m.cantidad ?? m.qty ?? 0),
-		motivo: m.motivo ?? m.reason ?? "",
-		documento: m.documento ?? m.doc ?? "",
-		responsable: m.responsable ?? m.user ?? "Admin",
-	};
-}
-
-function seedFallback() {
-	rows.value = [
-		{ id: null, fecha: "2024-04-25", tipo: "Entrada", producto: "Tornillos de Acero 5x50mm (100 uds)", cantidad: 50, motivo: "Reposición", documento: "FAC-2024-001", responsable: "Jose Martinez" },
-		{ id: null, fecha: "2024-04-24", tipo: "Entrada", producto: "Martillo de Acero de 16 oz", cantidad: 30, motivo: "Ajuste de Inventario", documento: "", responsable: "Ana López" },
-		{ id: null, fecha: "2024-04-23", tipo: "Salida", producto: "Teclado Inalámbrico", cantidad: 15, motivo: "Devolución", documento: "DEV-2024-003", responsable: "Carlos Gómez" },
-		{ id: null, fecha: "2024-04-22", tipo: "Salida", producto: "Taladro Percutor Bosch GSB 13 RE", cantidad: 5, motivo: "Venta", documento: "VEN-2024-145", responsable: "Maria Torres" },
-	];
-}
-
-const totalMovimientos = computed(() => rows.value.length);
-const totalEntradas = computed(() => rows.value.reduce((a, x) => a + (x.tipo === "Entrada" ? Number(x.cantidad) : 0), 0));
-const totalSalidas = computed(() => rows.value.reduce((a, x) => a + (x.tipo === "Salida" ? Number(x.cantidad) : 0), 0));
-
-const filteredRows = computed(() => {
-	let list = rows.value;
-
-	// tabs
-	if (filterTipo.value === "entrada") list = list.filter((m) => m.tipo === "Entrada");
-	if (filterTipo.value === "salida") list = list.filter((m) => m.tipo === "Salida");
-
-	// search
-	const q = search.value.trim().toLowerCase();
-	if (!q) return list;
-
-	return list.filter((m) => {
-		return (
-			String(m.fecha ?? "").toLowerCase().includes(q) ||
-			String(m.tipo ?? "").toLowerCase().includes(q) ||
-			String(m.producto ?? "").toLowerCase().includes(q) ||
-			String(m.motivo ?? "").toLowerCase().includes(q) ||
-			String(m.documento ?? "").toLowerCase().includes(q) ||
-			String(m.responsable ?? "").toLowerCase().includes(q)
-		);
+	const emptyForm = () => ({
+		fecha: toDateInputValue(new Date()),
+		tipo: "Entrada", // Entrada | Salida
+		producto: "",
+		cantidad: 0,
+		idMotivoMovimiento: null,
+		documento: "",
+		responsable: "Admin",
 	});
-});
+	const form = reactive(emptyForm());
 
-function rowKey(m) {
-	return String(m?.id ?? `${m?.fecha}-${m?.tipo}-${m?.producto}-${m?.cantidad}`);
-}
+	onMounted(async () => {
+		await loadAll();
+	});
 
-function openCreate() {
-	apiError.value = "";
-	Object.assign(form, emptyForm());
-	isOpen.value = true;
-}
-function closeModal() {
-	isOpen.value = false;
-}
-
-function validate() {
-	if (!form.fecha) return "La fecha es obligatoria.";
-	if (!form.tipo) return "El tipo es obligatorio.";
-	if (!form.producto) return "El producto es obligatorio.";
-	if (Number(form.cantidad) <= 0) return "La cantidad debe ser mayor que 0.";
-	if (!form.motivo) return "Debes seleccionar un motivo.";
-	return "";
-}
-
-async function readApiError(res) {
-	let msg = `Error (${res.status}).`;
-	try {
-		const data = await res.json();
-		msg = data.message || data.msg || data.error || JSON.stringify(data);
-	} catch { }
-	return new Error(msg);
-}
-
-async function createMovement() {
-	apiError.value = "";
-	const err = validate();
-	if (err) {
-		apiError.value = err;
-		return;
+	async function loadAll() {
+		loading.value = true;
+		loadError.value = "";
+		try {
+			// ✅ igual que roles: primero motivos, luego movimientos (para poder resolver labels)
+			await loadMotivos();
+			await loadMovimientos();
+		} catch (e) {
+			loadError.value = e?.message ?? "Error cargando inventario.";
+		} finally {
+			loading.value = false;
+		}
 	}
 
-	saving.value = true;
-	try {
-		// payload típico
-		const payload = {
-			fecha: form.fecha,
-			tipo: form.tipo,
-			producto: form.producto,
-			cantidad: Number(form.cantidad),
-			motivo: form.motivo,
-			documento: form.documento || null,
-			responsable: form.responsable || "Admin",
+	/** ===== NORMALIZERS ===== */
+	function normalizeList(data) {
+		if (Array.isArray(data)) return data;
+		if (Array.isArray(data?.items)) return data.items;
+		if (Array.isArray(data?.data)) return data.data;
+		if (Array.isArray(data?.result)) return data.result;
+		if (Array.isArray(data?.value)) return data.value;
+		return [];
+	}
+
+	function normalizeMotivo(x) {
+		// ✅ FIX: soporta idMotivoMovimiento / id / MotivoMovimientoId / IdMotivoMovimiento
+		const idMotivoMovimiento =
+			x?.idMotivoMovimiento ??
+			x?.motivoMovimientoId ??
+			x?.MotivoMovimientoId ??
+			x?.IdMotivoMovimiento ??
+			x?.id ??
+			null;
+
+		const descripcion =
+			x?.descripcion ??
+			x?.nombre ??
+			x?.motivo ??
+			x?.Descripcion ??
+			x?.Nombre ??
+			"";
+
+		return { ...x, idMotivoMovimiento, descripcion };
+	}
+
+	function normalizeMovement(m) {
+		const fecha = m?.fecha ?? m?.fechaMovimiento ?? m?.createdAt ?? m?.date ?? null;
+
+		let tipo = m?.tipo ?? m?.type ?? m?.tipoMovimiento ?? "Entrada";
+		if (typeof tipo === "number") tipo = tipo === 1 ? "Entrada" : "Salida";
+		if (typeof tipo === "string") {
+			const t = tipo.toLowerCase();
+			if (t.startsWith("e")) tipo = "Entrada";
+			else if (t.startsWith("s")) tipo = "Salida";
+			else if (t === "entrada" || t === "salida") tipo = t[0].toUpperCase() + t.slice(1);
+		}
+
+		// puede venir el texto o solo el id
+		const idMotivo =
+			m?.idMotivoMovimiento ??
+			m?.motivoId ??
+			m?.idMotivo ??
+			m?.IdMotivoMovimiento ??
+			null;
+
+		const motivoTxt =
+			m?.motivo ??
+			m?.motivoDescripcion ??
+			m?.descripcionMotivo ??
+			m?.Motivo ??
+			m?.MotivoDescripcion ??
+			null;
+
+		return {
+			...m,
+			idMovimiento: m?.idMovimiento ?? m?.movimientoId ?? m?.IdMovimiento ?? m?.id ?? null,
+			fecha: fecha ? normalizeDateString(fecha) : "",
+			tipo,
+			producto: m?.producto ?? m?.nombreProducto ?? m?.productName ?? m?.Producto ?? "",
+			cantidad: Number(m?.cantidad ?? m?.qty ?? m?.Cantidad ?? 0),
+			idMotivoMovimiento: idMotivo,
+			motivo: motivoTxt, // puede ser null, lo resolvemos en UI
+			documento: m?.documento ?? m?.doc ?? m?.Documento ?? "",
+			responsable: m?.responsable ?? m?.user ?? m?.Responsable ?? "",
 		};
+	}
 
-		const res = await fetch(MOV_ENDPOINT, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(payload),
-		});
+	/** ===== RESOLVER MOTIVO (para tabla y para fallback) ===== */
+	function resolveMotivoDescripcion(idMotivo) {
+		if (!idMotivo) return "";
+		const found = motivos.value.find((x) => Number(x.idMotivoMovimiento) === Number(idMotivo));
+		return found?.descripcion ?? "";
+	}
 
+	function motivoLabel(m) {
+		// 1) si API ya mandó el texto, úsalo
+		const txt = m?.motivo;
+		if (txt && String(txt).trim()) return String(txt).trim();
+
+		// 2) si no, resuelve por id
+		return resolveMotivoDescripcion(m?.idMotivoMovimiento) || "-";
+	}
+
+	function normalizeDateString(v) {
+		if (typeof v === "string") return v.slice(0, 10);
+		try { return new Date(v).toISOString().slice(0, 10); } catch { return String(v).slice(0, 10); }
+	}
+
+	/** ===== HTTP HELPERS ===== */
+	async function readApiError(res) {
+		let text = "";
+		try {
+			const ct = res.headers.get("content-type") || "";
+			if (ct.includes("application/json")) {
+				const data = await res.json();
+				text =
+					data?.message ||
+					data?.msg ||
+					data?.error ||
+					data?.title ||
+					(data?.errors ? JSON.stringify(data.errors) : "") ||
+					JSON.stringify(data);
+			} else {
+				text = await res.text();
+			}
+		} catch { }
+
+		const msg = text?.trim()
+			? `${res.status} ${res.statusText}: ${text}`
+			: `${res.status} ${res.statusText}`;
+
+		return new Error(msg);
+	}
+
+	/** ===== LOADERS ===== */
+	async function loadMotivos() {
+		motivosLoading.value = true;
+		motivosLoadedOnce.value = true;
+		motivosError.value = "";
+
+		try {
+			const res = await fetch(MOTIVOS_ENDPOINT);
+			if (!res.ok) throw await readApiError(res);
+
+			const data = await res.json();
+			const list = normalizeList(data);
+
+			motivos.value = list
+				.map(normalizeMotivo)
+				.filter((x) => x.idMotivoMovimiento != null && String(x.descripcion ?? "").trim().length > 0);
+
+			// ✅ si hay motivos, setea un default en el form (igual que Roles)
+			if (motivos.value.length > 0 && form.idMotivoMovimiento == null) {
+				form.idMotivoMovimiento = Number(motivos.value[0].idMotivoMovimiento);
+			}
+		} catch (e) {
+			motivos.value = [];
+			motivosError.value = e?.message ?? "No se pudieron cargar los motivos.";
+		} finally {
+			motivosLoading.value = false;
+		}
+	}
+
+	async function loadMovimientos() {
+		const res = await fetch(MOV_ENDPOINT);
 		if (!res.ok) throw await readApiError(res);
 
-		let created = null;
-		try { created = await res.json(); } catch { created = payload; }
+		const data = await res.json();
+		const list = normalizeList(data);
 
-		rows.value.unshift(normalizeMovement(created ?? payload));
-		closeModal();
-	} catch (e) {
-		apiError.value = e?.message ?? "Error registrando el movimiento.";
-	} finally {
-		saving.value = false;
+		rows.value = list.map(normalizeMovement);
 	}
-}
 
-function formatDate(v) {
-	// si viene yyyy-mm-dd, lo dejamos como en la imagen
-	if (!v) return "";
-	if (typeof v === "string" && v.length >= 10) return v.slice(0, 10);
-	try { return new Date(v).toISOString().slice(0, 10); } catch { return String(v); }
-}
+	/** ===== KPIs ===== */
+	const totalMovimientos = computed(() => rows.value.length);
+	const totalEntradas = computed(() =>
+		rows.value.reduce((a, x) => a + (x.tipo === "Entrada" ? Number(x.cantidad) : 0), 0)
+	);
+	const totalSalidas = computed(() =>
+		rows.value.reduce((a, x) => a + (x.tipo === "Salida" ? Number(x.cantidad) : 0), 0)
+	);
 
-function toDateInputValue(d) {
-	const pad = (n) => String(n).padStart(2, "0");
-	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
+	/** ===== FILTERS ===== */
+	const filteredRows = computed(() => {
+		let list = rows.value;
+
+		if (filterTipo.value === "entrada") list = list.filter((m) => m.tipo === "Entrada");
+		if (filterTipo.value === "salida") list = list.filter((m) => m.tipo === "Salida");
+
+		const q = search.value.trim().toLowerCase();
+		if (!q) return list;
+
+		return list.filter((m) => {
+			return (
+				String(m.fecha ?? "").toLowerCase().includes(q) ||
+				String(m.tipo ?? "").toLowerCase().includes(q) ||
+				String(m.producto ?? "").toLowerCase().includes(q) ||
+				String(motivoLabel(m) ?? "").toLowerCase().includes(q) ||
+				String(m.documento ?? "").toLowerCase().includes(q) ||
+				String(m.responsable ?? "").toLowerCase().includes(q)
+			);
+		});
+	});
+
+	/** ===== UI ===== */
+	function rowKey(m) {
+		return String(m?.idMovimiento ?? `${m?.fecha}-${m?.tipo}-${m?.producto}-${m?.cantidad}`);
+	}
+
+	function openCreate() {
+		apiError.value = "";
+		Object.assign(form, emptyForm(), {
+			idMotivoMovimiento: motivos.value?.[0]?.idMotivoMovimiento ?? null,
+		});
+		isOpen.value = true;
+	}
+
+	function closeModal() {
+		isOpen.value = false;
+	}
+
+	/** ===== VALIDATION ===== */
+	function validate() {
+		if (!form.fecha) return "La fecha es obligatoria.";
+		if (!form.tipo) return "El tipo es obligatorio.";
+		if (!form.producto) return "El producto es obligatorio.";
+		if (Number(form.cantidad) <= 0) return "La cantidad debe ser mayor que 0.";
+		if (!form.idMotivoMovimiento) return "Debes seleccionar un motivo.";
+		return "";
+	}
+
+	/** ===== CREATE ===== */
+	async function createMovement() {
+		apiError.value = "";
+		const err = validate();
+		if (err) { apiError.value = err; return; }
+
+		saving.value = true;
+		try {
+			const payload = {
+				fecha: form.fecha,
+				tipo: form.tipo,
+				producto: form.producto,
+				cantidad: Number(form.cantidad),
+
+				// ✅ mandamos ambos nombres por compatibilidad (por si tu backend usa otro)
+				idMotivoMovimiento: Number(form.idMotivoMovimiento),
+				motivoMovimientoId: Number(form.idMotivoMovimiento),
+
+				documento: form.documento || null,
+				responsable: form.responsable || null,
+			};
+
+			const res = await fetch(MOV_ENDPOINT, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+
+			if (!res.ok) throw await readApiError(res);
+
+			let created = null;
+			try { created = await res.json(); } catch { created = null; }
+
+			if (created) rows.value.unshift(normalizeMovement(created));
+			else await loadMovimientos();
+
+			closeModal();
+		} catch (e) {
+			apiError.value = e?.message ?? "Error registrando el movimiento.";
+		} finally {
+			saving.value = false;
+		}
+	}
+
+	/** ===== DATES ===== */
+	function formatDate(v) {
+		if (!v) return "";
+		if (typeof v === "string" && v.length >= 10) return v.slice(0, 10);
+		try { return new Date(v).toISOString().slice(0, 10); } catch { return String(v); }
+	}
+
+	function toDateInputValue(d) {
+		const pad = (n) => String(n).padStart(2, "0");
+		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+	}
 </script>
 
 <style scoped>
+	/* tu CSS original + 2 utilidades */
 	.page {
 		min-height: 100vh;
 		background: #eef3ff;
@@ -398,6 +567,20 @@ function toDateInputValue(d) {
 		padding: 22px;
 	}
 
+	.mutedLine {
+		color: #64748b;
+		font-weight: 800;
+		padding: 10px 2px;
+	}
+
+	.miniWarn {
+		margin-top: 8px;
+		color: #b45309;
+		font-weight: 800;
+		font-size: 12px;
+	}
+
+	/* ---- tu CSS (sin cambios de estilo, copiado tal cual) ---- */
 	.hdr {
 		display: flex;
 		align-items: center;
@@ -702,10 +885,6 @@ function toDateInputValue(d) {
 		color: #2563eb;
 	}
 
-	.doc .doc-txt:empty {
-		color: #94a3b8;
-	}
-
 	.tfoot {
 		display: flex;
 		align-items: center;
@@ -716,7 +895,6 @@ function toDateInputValue(d) {
 		font-size: 13px;
 	}
 
-	/* MODAL */
 	.modalOverlay {
 		position: fixed;
 		inset: 0;
