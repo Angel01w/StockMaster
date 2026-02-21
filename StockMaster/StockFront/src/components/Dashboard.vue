@@ -128,12 +128,14 @@
 
                     <div class="row" v-for="p in lowStockRows" :key="p.id">
                         <div class="prod">
-                            <div class="pimg" />
                             <div class="pn">
                                 <div class="pname">{{ p.nombre }}</div>
                             </div>
                         </div>
-                        <div class="mut">{{ p.categoria }}</div>
+
+                        <!-- ✅ ARREGLADO: ya no imprime objeto -->
+                        <div class="mut">{{ p.categoriaNombre }}</div>
+
                         <div class="r strong">{{ p.stock }}</div>
                         <div class="r strong">{{ p.minimo }}</div>
                     </div>
@@ -197,7 +199,6 @@
     const API_BASE = "https://localhost:7198";
     const PRODUCTOS_ENDPOINT = `${API_BASE}/api/Productos`;
     const MOVS_ENDPOINT = `${API_BASE}/api/Movimientos`;
-    // opcional: si existe en tu backend, lo usa; si no, compone con Productos+Movimientos
     const DASH_ENDPOINT = `${API_BASE}/api/Dashboard`;
 
     /** =========================
@@ -209,7 +210,7 @@
     const productos = ref([]);
     const movimientosRaw = ref([]);
 
-    const rangeMonths = ref(6); // 6 / 12
+    const rangeMonths = ref(6);
     const months = ref([]);
     const entradasSeries = ref([]);
     const salidasSeries = ref([]);
@@ -226,7 +227,6 @@
         lowStockCount: 0,
     });
 
-    /** cancelación segura */
     let alive = true;
     onBeforeUnmount(() => { alive = false; });
 
@@ -241,6 +241,8 @@
         if (Array.isArray(data)) return data;
         if (Array.isArray(data?.items)) return data.items;
         if (Array.isArray(data?.data)) return data.data;
+        if (Array.isArray(data?.result)) return data.result;
+        if (Array.isArray(data?.value)) return data.value;
         return [];
     }
 
@@ -258,6 +260,46 @@
     function monthLabel(dt) {
         const map = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
         return map[dt.getMonth()];
+    }
+
+    function safeString(v) {
+        if (v == null) return "";
+        if (typeof v === "string") return v;
+        if (typeof v === "number" || typeof v === "boolean") return String(v);
+        if (typeof v === "object") {
+            // evita "[object Object]" en UI
+            return v?.nombre ?? v?.name ?? v?.descripcion ?? v?.description ?? "";
+        }
+        return String(v);
+    }
+
+    function extractCategoriaNombre(raw) {
+        // En tu screenshot "categoría" viene como OBJETO dentro del producto
+        // { idCategoria, nombre, descripcion, ... }
+        const c =
+            raw?.categoria ??
+            raw?.Categoria ??
+            raw?.category ??
+            raw?.categoriaDto ??
+            null;
+
+        // si viene objeto
+        if (c && typeof c === "object") {
+            return (
+                safeString(c?.nombre) ||
+                safeString(c?.name) ||
+                safeString(c?.descripcion) ||
+                "—"
+            );
+        }
+
+        // si viene string
+        const asStr = safeString(raw?.categoriaNombre || raw?.categoryName || c);
+        if (asStr && asStr.trim()) return asStr.trim();
+
+        // si solo tenemos el id
+        const id = raw?.idCategoria ?? raw?.categoriaId ?? raw?.IdCategoria ?? null;
+        return id ? `ID ${id}` : "—";
     }
 
     async function fetchJson(url, opts = {}) {
@@ -280,22 +322,24 @@
         const ct = res.headers.get("content-type") || "";
         if (ct.includes("application/json")) return await res.json();
 
-        // si viene vacío
         const text = await res.text();
         return text ? JSON.parse(text) : null;
     }
 
     /** =========================
-     *  NORMALIZERS (sin inventar)
+     *  NORMALIZERS (ARREGLADOS)
      *  ========================= */
     function normalizeProducto(p, idx) {
         const id = p?.idProducto ?? p?.id ?? p?.productoId ?? p?.codigo ?? idx;
         const nombre = p?.nombre ?? p?.descripcion ?? p?.name ?? "";
-        const categoria = p?.categoria ?? p?.categoriaNombre ?? p?.category ?? "";
-        const stock = toNumber(p?.stock ?? p?.existencia ?? p?.cantidad ?? p?.qty, 0);
+        const stock = toNumber(p?.stockActual ?? p?.stock ?? p?.existencia ?? p?.cantidad ?? p?.qty, 0);
         const minimo = toNumber(p?.stockMinimo ?? p?.minimo ?? p?.minStock ?? p?.reorderLevel, 0);
 
-        return { id, nombre, categoria, stock, minimo, _raw: p };
+        // ✅ esto es lo que se estaba rompiendo en el dashboard:
+        // estabas guardando "categoria" como objeto, y luego el template lo imprimía tal cual.
+        const categoriaNombre = extractCategoriaNombre(p);
+
+        return { id, nombre, categoriaNombre, stock, minimo, _raw: p };
     }
 
     function normalizeMovimiento(m, idx) {
@@ -328,7 +372,6 @@
         error.value = "";
 
         try {
-            // 1) Si existe dashboard en backend, úsalo
             let dash = null;
             try {
                 dash = await fetchJson(`${DASH_ENDPOINT}?months=${rangeMonths.value}`);
@@ -355,19 +398,22 @@
                 const ls = dash?.lowStock ?? {};
                 const lsItems = normalizeList(ls.items);
                 lowStockTotal.value = toNumber(ls.total, lsItems.length);
-                lowStockRows.value = lsItems.map((p, i) => normalizeProducto(p, i))
-                    .filter((p) => p.nombre) // sin inventar
+
+                // ✅ aquí ya normalizamos correctamente la categoría (nombre)
+                lowStockRows.value = lsItems
+                    .map((p, i) => normalizeProducto(p, i))
+                    .filter((p) => p.nombre)
                     .slice(0, 5);
 
                 const mv = dash?.movimientos ?? {};
-                movRows.value = normalizeList(mv.items).map((m, i) => normalizeMovimiento(m, i))
-                    .filter((m) => m.producto || m.motivo || m.responsable || m._dt) // sin inventar
+                movRows.value = normalizeList(mv.items)
+                    .map((m, i) => normalizeMovimiento(m, i))
+                    .filter((m) => m.producto || m.motivo || m.responsable || m._dt)
                     .slice(0, 8);
 
                 return;
             }
 
-            // 2) Sin /api/Dashboard: compone con Productos + Movimientos
             const [prodsRaw, movsRaw] = await Promise.all([
                 fetchJson(PRODUCTOS_ENDPOINT),
                 fetchJson(MOVS_ENDPOINT),
@@ -392,7 +438,7 @@
     }
 
     /** =========================
-     *  COMPUTES (sin fallback)
+     *  COMPUTES
      *  ========================= */
     function computeKPIs() {
         const totalProds = productos.value.length;
@@ -469,7 +515,7 @@
     }
 
     /** =========================
-     *  CHART GEOMETRY (reactivo)
+     *  CHART GEOMETRY
      *  ========================= */
     const W = 920, H = 230, PAD_TOP = 18, PAD_BOTTOM = 38, PAD_LR = 34;
 
@@ -520,23 +566,16 @@
 
     function toggleRange() {
         rangeMonths.value = rangeMonths.value === 6 ? 12 : 6;
-        // si ya tenemos datos, recomputa, si no, recarga
         if (movimientosRaw.value.length > 0) computeChartFromMovs();
         else loadAll();
     }
 
-    function goLowStock() {
-        // aquí pon tu router si quieres
-        // router.push("/productos?lowStock=1")
-        console.log("Ir a low stock");
-    }
-    function goMovimientos() {
-        // router.push("/movimientos")
-        console.log("Ir a movimientos");
-    }
+    function goLowStock() { console.log("Ir a low stock"); }
+    function goMovimientos() { console.log("Ir a movimientos"); }
 </script>
 
 <style scoped>
+    /* ✅ TU CSS IGUAL (sin cambios) */
     .dash {
         display: flex;
         flex-direction: column;

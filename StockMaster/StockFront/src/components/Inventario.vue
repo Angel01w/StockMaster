@@ -19,12 +19,10 @@
 				</button>
 			</div>
 
-			<!-- Error global -->
 			<div v-if="loadError" class="alert">
 				{{ loadError }}
 			</div>
 
-			<!-- Stats -->
 			<div class="stats">
 				<div class="stat">
 					<div class="stat-ic ic-blue">
@@ -69,7 +67,6 @@
 				</div>
 			</div>
 
-			<!-- Tabla -->
 			<div class="card">
 				<div class="toolbar">
 					<div class="search">
@@ -116,7 +113,6 @@
 						<div class="prod">{{ m.producto }}</div>
 						<div class="num qty">{{ m.cantidad }}</div>
 
-						<!-- ✅ ahora motivo se resuelve aunque el API mande solo idMotivoMovimiento -->
 						<div class="muted">{{ motivoLabel(m) }}</div>
 
 						<div class="doc">
@@ -189,17 +185,14 @@
 									{{ motivosLoading ? "Cargando motivos..." : "Seleccione un motivo" }}
 								</option>
 
-								<option v-for="mm in motivos" :key="String(mm.idMotivoMovimiento)" :value="mm.idMotivoMovimiento">
+								<option v-for="mm in motivos" :key="String(mm.idMotivoMovimiento)" :value="Number(mm.idMotivoMovimiento)">
 									{{ mm.descripcion }}
 								</option>
 							</select>
 
-							<!-- ✅ mensaje tipo Roles: si el endpoint vino vacío -->
 							<div v-if="!motivosLoading && motivosLoadedOnce && motivos.length === 0" class="miniWarn">
 								No hay motivos registrados en la base de datos (api/MotivosMovimiento devolvió vacío).
 							</div>
-
-							<!-- errores reales (401/500/etc) -->
 							<div v-else-if="motivosError" class="miniWarn">{{ motivosError }}</div>
 						</div>
 
@@ -226,12 +219,16 @@
 <script setup>
 	import { computed, onMounted, reactive, ref } from "vue";
 
-	// ✅ AJUSTA si tu backend usa otro server/puerto
 	const API_BASE = "https://localhost:7198";
-
-	// ✅ según Swagger
 	const MOV_ENDPOINT = `${API_BASE}/api/Movimientos`;
-	const MOTIVOS_ENDPOINT = `${API_BASE}/api/MotivosMovimiento`;
+
+	const MOTIVOS_ENDPOINTS = [
+		`${API_BASE}/api/MotivosMovimiento`,
+		`${API_BASE}/api/MotivoMovimiento`,
+		`${API_BASE}/api/MotivosMovimientos`,
+		`${API_BASE}/api/MotivosInventario`,
+		`${API_BASE}/api/InventarioMotivos`,
+	];
 
 	const search = ref("");
 	const filterTipo = ref("todos");
@@ -245,17 +242,17 @@
 
 	const rows = ref([]);
 
-	// motivos desde API
 	const motivos = ref([]);
 	const motivosError = ref("");
 
-	// ✅ estado de carga tipo "Roles"
 	const motivosLoading = ref(false);
 	const motivosLoadedOnce = ref(false);
 
+	const motivosEndpointUsado = ref("");
+
 	const emptyForm = () => ({
 		fecha: toDateInputValue(new Date()),
-		tipo: "Entrada", // Entrada | Salida
+		tipo: "Entrada",
 		producto: "",
 		cantidad: 0,
 		idMotivoMovimiento: null,
@@ -272,7 +269,6 @@
 		loading.value = true;
 		loadError.value = "";
 		try {
-			// ✅ igual que roles: primero motivos, luego movimientos (para poder resolver labels)
 			await loadMotivos();
 			await loadMovimientos();
 		} catch (e) {
@@ -282,41 +278,68 @@
 		}
 	}
 
-	/** ===== NORMALIZERS ===== */
+	/** =======================
+	 * NORMALIZERS
+	 * ======================= */
+
+	// ✅ AGREGADO: soporte $values (muy típico en .NET si ReferenceHandler.Preserve)
 	function normalizeList(data) {
 		if (Array.isArray(data)) return data;
+
+		// ASP.NET preserve references
+		if (Array.isArray(data?.$values)) return data.$values;
+
 		if (Array.isArray(data?.items)) return data.items;
 		if (Array.isArray(data?.data)) return data.data;
 		if (Array.isArray(data?.result)) return data.result;
 		if (Array.isArray(data?.value)) return data.value;
+		if (Array.isArray(data?.results)) return data.results;
+
 		return [];
 	}
 
+	// ✅ FIX REAL: tu tabla trae IdMotivo, Nombre, TipoAplica
 	function normalizeMotivo(x) {
-		// ✅ FIX: soporta idMotivoMovimiento / id / MotivoMovimientoId / IdMotivoMovimiento
 		const idMotivoMovimiento =
 			x?.idMotivoMovimiento ??
 			x?.motivoMovimientoId ??
 			x?.MotivoMovimientoId ??
 			x?.IdMotivoMovimiento ??
+			x?.IdMotivo ??           // ✅ NEW (SQL)
+			x?.idMotivo ??           // ✅ NEW (posible DTO)
 			x?.id ??
+			x?.Id ??
 			null;
 
 		const descripcion =
 			x?.descripcion ??
-			x?.nombre ??
-			x?.motivo ??
 			x?.Descripcion ??
-			x?.Nombre ??
+			x?.nombre ??
+			x?.Nombre ??             // ✅ NEW (SQL)
+			x?.motivo ??
+			x?.Motivo ??
 			"";
 
-		return { ...x, idMotivoMovimiento, descripcion };
+		// opcional por si luego filtras por tipo aplica
+		const tipoAplica =
+			x?.tipoAplica ??
+			x?.TipoAplica ??
+			x?.aplica ??
+			x?.Aplica ??
+			null;
+
+		return {
+			...x,
+			idMotivoMovimiento: idMotivoMovimiento != null ? Number(idMotivoMovimiento) : null,
+			descripcion: String(descripcion ?? "").trim(),
+			tipoAplica,
+		};
 	}
 
 	function normalizeMovement(m) {
 		const fecha = m?.fecha ?? m?.fechaMovimiento ?? m?.createdAt ?? m?.date ?? null;
 
-		let tipo = m?.tipo ?? m?.type ?? m?.tipoMovimiento ?? "Entrada";
+		let tipo = m?.tipo ?? m?.type ?? m?.tipoMovimiento ?? m?.Tipo ?? "Entrada";
 		if (typeof tipo === "number") tipo = tipo === 1 ? "Entrada" : "Salida";
 		if (typeof tipo === "string") {
 			const t = tipo.toLowerCase();
@@ -325,12 +348,14 @@
 			else if (t === "entrada" || t === "salida") tipo = t[0].toUpperCase() + t.slice(1);
 		}
 
-		// puede venir el texto o solo el id
 		const idMotivo =
 			m?.idMotivoMovimiento ??
+			m?.motivoMovimientoId ??
+			m?.IdMotivoMovimiento ??
+			m?.IdMotivo ??     // ✅ por si el backend manda IdMotivo
+			m?.idMotivo ??
 			m?.motivoId ??
 			m?.idMotivo ??
-			m?.IdMotivoMovimiento ??
 			null;
 
 		const motivoTxt =
@@ -348,27 +373,11 @@
 			tipo,
 			producto: m?.producto ?? m?.nombreProducto ?? m?.productName ?? m?.Producto ?? "",
 			cantidad: Number(m?.cantidad ?? m?.qty ?? m?.Cantidad ?? 0),
-			idMotivoMovimiento: idMotivo,
-			motivo: motivoTxt, // puede ser null, lo resolvemos en UI
+			idMotivoMovimiento: idMotivo != null ? Number(idMotivo) : null,
+			motivo: motivoTxt,
 			documento: m?.documento ?? m?.doc ?? m?.Documento ?? "",
 			responsable: m?.responsable ?? m?.user ?? m?.Responsable ?? "",
 		};
-	}
-
-	/** ===== RESOLVER MOTIVO (para tabla y para fallback) ===== */
-	function resolveMotivoDescripcion(idMotivo) {
-		if (!idMotivo) return "";
-		const found = motivos.value.find((x) => Number(x.idMotivoMovimiento) === Number(idMotivo));
-		return found?.descripcion ?? "";
-	}
-
-	function motivoLabel(m) {
-		// 1) si API ya mandó el texto, úsalo
-		const txt = m?.motivo;
-		if (txt && String(txt).trim()) return String(txt).trim();
-
-		// 2) si no, resuelve por id
-		return resolveMotivoDescripcion(m?.idMotivoMovimiento) || "-";
 	}
 
 	function normalizeDateString(v) {
@@ -376,7 +385,24 @@
 		try { return new Date(v).toISOString().slice(0, 10); } catch { return String(v).slice(0, 10); }
 	}
 
-	/** ===== HTTP HELPERS ===== */
+	/** =======================
+	 * RESOLVER MOTIVO
+	 * ======================= */
+	function resolveMotivoDescripcion(idMotivo) {
+		if (!idMotivo) return "";
+		const found = motivos.value.find((x) => Number(x.idMotivoMovimiento) === Number(idMotivo));
+		return found?.descripcion ?? "";
+	}
+
+	function motivoLabel(m) {
+		const txt = m?.motivo;
+		if (txt && String(txt).trim()) return String(txt).trim();
+		return resolveMotivoDescripcion(m?.idMotivoMovimiento) || "-";
+	}
+
+	/** =======================
+	 * HTTP HELPERS
+	 * ======================= */
 	async function readApiError(res) {
 		let text = "";
 		try {
@@ -393,7 +419,7 @@
 			} else {
 				text = await res.text();
 			}
-		} catch { }
+		} catch {}
 
 		const msg = text?.trim()
 			? `${res.status} ${res.statusText}: ${text}`
@@ -402,24 +428,51 @@
 		return new Error(msg);
 	}
 
-	/** ===== LOADERS ===== */
+	async function fetchFirstList(endpoints) {
+		let lastErr = null;
+
+		for (const url of endpoints) {
+			try {
+				const res = await fetch(url);
+
+				if (!res.ok) {
+					lastErr = await readApiError(res);
+					continue;
+				}
+
+				if (res.status === 204) {
+					return { url, list: [] };
+				}
+
+				const data = await res.json();
+				const list = normalizeList(data);
+				return { url, list };
+			} catch (e) {
+				lastErr = e;
+			}
+		}
+
+		throw (lastErr ?? new Error("No se pudo cargar la lista."));
+	}
+
+	/** =======================
+	 * LOADERS
+	 * ======================= */
 	async function loadMotivos() {
 		motivosLoading.value = true;
 		motivosLoadedOnce.value = true;
 		motivosError.value = "";
+		motivosEndpointUsado.value = "";
 
 		try {
-			const res = await fetch(MOTIVOS_ENDPOINT);
-			if (!res.ok) throw await readApiError(res);
+			const { url, list } = await fetchFirstList(MOTIVOS_ENDPOINTS);
+			motivosEndpointUsado.value = url;
 
-			const data = await res.json();
-			const list = normalizeList(data);
-
+			// ✅ ya normaliza IdMotivo/Nombre y no “bota” los registros
 			motivos.value = list
 				.map(normalizeMotivo)
 				.filter((x) => x.idMotivoMovimiento != null && String(x.descripcion ?? "").trim().length > 0);
 
-			// ✅ si hay motivos, setea un default en el form (igual que Roles)
 			if (motivos.value.length > 0 && form.idMotivoMovimiento == null) {
 				form.idMotivoMovimiento = Number(motivos.value[0].idMotivoMovimiento);
 			}
@@ -441,7 +494,9 @@
 		rows.value = list.map(normalizeMovement);
 	}
 
-	/** ===== KPIs ===== */
+	/** =======================
+	 * KPIs
+	 * ======================= */
 	const totalMovimientos = computed(() => rows.value.length);
 	const totalEntradas = computed(() =>
 		rows.value.reduce((a, x) => a + (x.tipo === "Entrada" ? Number(x.cantidad) : 0), 0)
@@ -450,7 +505,9 @@
 		rows.value.reduce((a, x) => a + (x.tipo === "Salida" ? Number(x.cantidad) : 0), 0)
 	);
 
-	/** ===== FILTERS ===== */
+	/** =======================
+	 * FILTERS
+	 * ======================= */
 	const filteredRows = computed(() => {
 		let list = rows.value;
 
@@ -472,7 +529,9 @@
 		});
 	});
 
-	/** ===== UI ===== */
+	/** =======================
+	 * UI
+	 * ======================= */
 	function rowKey(m) {
 		return String(m?.idMovimiento ?? `${m?.fecha}-${m?.tipo}-${m?.producto}-${m?.cantidad}`);
 	}
@@ -489,7 +548,9 @@
 		isOpen.value = false;
 	}
 
-	/** ===== VALIDATION ===== */
+	/** =======================
+	 * VALIDATION
+	 * ======================= */
 	function validate() {
 		if (!form.fecha) return "La fecha es obligatoria.";
 		if (!form.tipo) return "El tipo es obligatorio.";
@@ -499,7 +560,9 @@
 		return "";
 	}
 
-	/** ===== CREATE ===== */
+	/** =======================
+	 * CREATE
+	 * ======================= */
 	async function createMovement() {
 		apiError.value = "";
 		const err = validate();
@@ -513,9 +576,10 @@
 				producto: form.producto,
 				cantidad: Number(form.cantidad),
 
-				// ✅ mandamos ambos nombres por compatibilidad (por si tu backend usa otro)
+				// ✅ enviamos todas por compatibilidad
 				idMotivoMovimiento: Number(form.idMotivoMovimiento),
 				motivoMovimientoId: Number(form.idMotivoMovimiento),
+				idMotivo: Number(form.idMotivoMovimiento),  // ✅ por si tu backend usa IdMotivo
 
 				documento: form.documento || null,
 				responsable: form.responsable || null,
@@ -543,7 +607,9 @@
 		}
 	}
 
-	/** ===== DATES ===== */
+	/** =======================
+	 * DATES
+	 * ======================= */
 	function formatDate(v) {
 		if (!v) return "";
 		if (typeof v === "string" && v.length >= 10) return v.slice(0, 10);

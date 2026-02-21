@@ -56,7 +56,6 @@
 						<div class="actions-h">Acciones</div>
 					</div>
 
-					<!-- ✅ si no hay data real -->
 					<div v-if="!loading && filteredRows.length === 0" class="empty">
 						No hay productos. Crea uno con “Nuevo Producto”.
 					</div>
@@ -127,15 +126,40 @@
 							<textarea v-model.trim="form.descripcion" rows="4"></textarea>
 						</div>
 
+						<!-- ✅ CAMBIO: SELECTS en vez de inputs -->
 						<div class="grid2">
 							<div class="field">
-								<label>ID Categoría</label>
-								<input type="number" min="1" step="1" v-model.number="form.idCategoria" />
+								<label>Categoría</label>
+								<select v-model.number="form.idCategoria" :disabled="categoriasLoading">
+									<option :value="0" disabled>
+										{{ categoriasLoading ? "Cargando categorías..." : "Seleccione una categoría" }}
+									</option>
+									<option v-for="c in categorias" :key="String(c.idCategoria)" :value="Number(c.idCategoria)">
+										{{ c.nombre }}
+									</option>
+								</select>
+
+								<div v-if="!categoriasLoading && categoriasLoadedOnce && categorias.length === 0" class="miniWarn">
+									No hay categorías registradas (api/Categorias devolvió vacío).
+								</div>
+								<div v-else-if="categoriasError" class="miniWarn">{{ categoriasError }}</div>
 							</div>
 
 							<div class="field">
-								<label>ID Proveedor</label>
-								<input type="number" min="1" step="1" v-model.number="form.idProveedor" />
+								<label>Proveedor</label>
+								<select v-model.number="form.idProveedor" :disabled="proveedoresLoading">
+									<option :value="0" disabled>
+										{{ proveedoresLoading ? "Cargando proveedores..." : "Seleccione un proveedor" }}
+									</option>
+									<option v-for="p in proveedores" :key="String(p.idProveedor)" :value="Number(p.idProveedor)">
+										{{ p.nombreEmpresa }}
+									</option>
+								</select>
+
+								<div v-if="!proveedoresLoading && proveedoresLoadedOnce && proveedores.length === 0" class="miniWarn">
+									No hay proveedores registrados (api/Proveedores devolvió vacío).
+								</div>
+								<div v-else-if="proveedoresError" class="miniWarn">{{ proveedoresError }}</div>
 							</div>
 						</div>
 
@@ -167,7 +191,7 @@
 					<div class="modalFoot">
 						<button class="btnLink" type="button" @click="closeModal">Cancelar</button>
 
-						<button class="btnPrimary" type="button" :disabled="saving" @click="saveProduct">
+						<button class="btnPrimary" type="button" :disabled="saving || categoriasLoading || proveedoresLoading" @click="saveProduct">
 							{{ saving ? (mode === "create" ? "Creando..." : "Guardando...") : (mode === "create" ? "Crear Producto" : "Guardar Cambios") }}
 						</button>
 					</div>
@@ -182,7 +206,23 @@
 	import { computed, onMounted, reactive, ref } from "vue";
 
 	const API_BASE = "https://localhost:7198";
+
 	const PRODUCTS_ENDPOINT = `${API_BASE}/api/Productos`;
+
+	// ✅ NUEVO: endpoints para combos
+	const CATEGORIAS_ENDPOINTS = [
+		`${API_BASE}/api/Categorias`,
+		`${API_BASE}/api/Categoria`,
+		`${API_BASE}/api/Categoría`,
+		`${API_BASE}/api/Categories`,
+	];
+
+	const PROVEEDORES_ENDPOINTS = [
+		`${API_BASE}/api/Proveedores`,
+		`${API_BASE}/api/Proveedor`,
+		`${API_BASE}/api/Suplidores`,
+		`${API_BASE}/api/Suppliers`,
+	];
 
 	const search = ref("");
 	const isOpen = ref(false);
@@ -198,6 +238,19 @@
 
 	const rows = ref([]);
 
+	// ✅ NUEVO: listas para selects
+	const categorias = ref([]);
+	const proveedores = ref([]);
+
+	const categoriasLoading = ref(false);
+	const proveedoresLoading = ref(false);
+
+	const categoriasLoadedOnce = ref(false);
+	const proveedoresLoadedOnce = ref(false);
+
+	const categoriasError = ref("");
+	const proveedoresError = ref("");
+
 	const emptyForm = () => ({
 		idProducto: null,
 		codigo: "",
@@ -212,7 +265,69 @@
 	});
 	const form = reactive(emptyForm());
 
-	onMounted(loadProducts);
+	onMounted(async () => {
+		await loadProducts();
+		// ✅ precarga combos (para que el modal abra con data)
+		await Promise.all([loadCategorias(), loadProveedores()]);
+	});
+
+	/** =======================
+	 * Helpers de lista (incluye $values)
+	 * ======================= */
+	function normalizeList(data) {
+		if (Array.isArray(data)) return data;
+		if (Array.isArray(data?.$values)) return data.$values;
+		if (Array.isArray(data?.items)) return data.items;
+		if (Array.isArray(data?.data)) return data.data;
+		if (Array.isArray(data?.result)) return data.result;
+		if (Array.isArray(data?.value)) return data.value;
+		if (Array.isArray(data?.results)) return data.results;
+		return [];
+	}
+
+	function normalizeCategoria(x) {
+		const idCategoria =
+			x?.idCategoria ??
+			x?.IdCategoria ??
+			x?.categoriaId ??
+			x?.CategoriaId ??
+			x?.id ??
+			x?.Id ??
+			null;
+
+		const nombre =
+			x?.nombre ??
+			x?.Nombre ??
+			x?.descripcion ??
+			x?.Descripcion ??
+			x?.name ??
+			"";
+
+		return { ...x, idCategoria: idCategoria != null ? Number(idCategoria) : null, nombre: String(nombre ?? "").trim() };
+	}
+
+	function normalizeProveedor(x) {
+		const idProveedor =
+			x?.idProveedor ??
+			x?.IdProveedor ??
+			x?.proveedorId ??
+			x?.ProveedorId ??
+			x?.id ??
+			x?.Id ??
+			null;
+
+		const nombreEmpresa =
+			x?.nombreEmpresa ??
+			x?.NombreEmpresa ??
+			x?.nombre ??
+			x?.Nombre ??
+			x?.empresa ??
+			x?.Empresa ??
+			x?.name ??
+			"";
+
+		return { ...x, idProveedor: idProveedor != null ? Number(idProveedor) : null, nombreEmpresa: String(nombreEmpresa ?? "").trim() };
+	}
 
 	async function loadProducts() {
 		loading.value = true;
@@ -222,7 +337,7 @@
 			if (!res.ok) throw new Error(`GET /api/Productos falló (${res.status})`);
 
 			const data = await res.json();
-			const list = Array.isArray(data) ? data : (data?.items ?? []);
+			const list = normalizeList(data);
 
 			rows.value = list;
 		} catch (e) {
@@ -233,16 +348,115 @@
 		}
 	}
 
+	async function readApiError(res) {
+		let msg = `Error (${res.status}).`;
+		try {
+			const ct = res.headers.get("content-type") || "";
+			if (ct.includes("application/json")) {
+				const data = await res.json();
+				msg = data.message || data.msg || data.error || data.title || JSON.stringify(data);
+			} else {
+				msg = await res.text();
+			}
+		} catch { }
+		return new Error(msg);
+	}
+
+	/**
+	 * ✅ igual que hicimos en Inventario/Roles:
+	 * intenta varias rutas típicas y normaliza estructura
+	 */
+	async function fetchFirstList(endpoints) {
+		let lastErr = null;
+
+		for (const url of endpoints) {
+			try {
+				const res = await fetch(url);
+				if (!res.ok) {
+					lastErr = await readApiError(res);
+					continue;
+				}
+				if (res.status === 204) return { url, list: [] };
+
+				const data = await res.json();
+				return { url, list: normalizeList(data) };
+			} catch (e) {
+				lastErr = e;
+			}
+		}
+		throw (lastErr ?? new Error("No se pudo cargar la lista."));
+	}
+
+	async function loadCategorias() {
+		categoriasLoading.value = true;
+		categoriasLoadedOnce.value = true;
+		categoriasError.value = "";
+
+		try {
+			const { list } = await fetchFirstList(CATEGORIAS_ENDPOINTS);
+			categorias.value = list
+				.map(normalizeCategoria)
+				.filter((x) => x.idCategoria != null && x.nombre);
+
+			// default al abrir modal
+			if (categorias.value.length && Number(form.idCategoria) <= 0) {
+				form.idCategoria = Number(categorias.value[0].idCategoria);
+			}
+		} catch (e) {
+			categorias.value = [];
+			categoriasError.value = e?.message ?? "No se pudieron cargar categorías.";
+		} finally {
+			categoriasLoading.value = false;
+		}
+	}
+
+	async function loadProveedores() {
+		proveedoresLoading.value = true;
+		proveedoresLoadedOnce.value = true;
+		proveedoresError.value = "";
+
+		try {
+			const { list } = await fetchFirstList(PROVEEDORES_ENDPOINTS);
+			proveedores.value = list
+				.map(normalizeProveedor)
+				.filter((x) => x.idProveedor != null && x.nombreEmpresa);
+
+			if (proveedores.value.length && Number(form.idProveedor) <= 0) {
+				form.idProveedor = Number(proveedores.value[0].idProveedor);
+			}
+		} catch (e) {
+			proveedores.value = [];
+			proveedoresError.value = e?.message ?? "No se pudieron cargar proveedores.";
+		} finally {
+			proveedoresLoading.value = false;
+		}
+	}
+
 	function rowKey(p) {
 		return String(p?.idProducto ?? p?.codigo ?? Math.random());
 	}
 
+	// ✅ ahora resuelve por lista local si la API no trae navegación
 	function categoriaNombre(p) {
-		return p?.categoria?.nombre ?? (p?.idCategoria ? `ID ${p.idCategoria}` : "");
+		const nested = p?.categoria?.nombre ?? p?.categoria?.Nombre;
+		if (nested) return nested;
+
+		const id = p?.idCategoria ?? p?.IdCategoria ?? null;
+		if (!id) return "";
+
+		const found = categorias.value.find((c) => Number(c.idCategoria) === Number(id));
+		return found?.nombre ?? `ID ${id}`;
 	}
 
 	function proveedorNombre(p) {
-		return p?.proveedor?.nombreEmpresa ?? (p?.idProveedor ? `ID ${p.idProveedor}` : "");
+		const nested = p?.proveedor?.nombreEmpresa ?? p?.proveedor?.NombreEmpresa ?? p?.proveedor?.nombre ?? p?.proveedor?.Nombre;
+		if (nested) return nested;
+
+		const id = p?.idProveedor ?? p?.IdProveedor ?? null;
+		if (!id) return "";
+
+		const found = proveedores.value.find((x) => Number(x.idProveedor) === Number(id));
+		return found?.nombreEmpresa ?? `ID ${id}`;
 	}
 
 	const filteredRows = computed(() => {
@@ -250,8 +464,8 @@
 		if (!q) return rows.value;
 
 		return rows.value.filter((p) => {
-			const cat = String(p?.categoria?.nombre ?? "").toLowerCase();
-			const prov = String(p?.proveedor?.nombreEmpresa ?? "").toLowerCase();
+			const cat = String(categoriaNombre(p) ?? "").toLowerCase();
+			const prov = String(proveedorNombre(p) ?? "").toLowerCase();
 
 			return (
 				String(p.codigo ?? "").toLowerCase().includes(q) ||
@@ -280,15 +494,29 @@
 		return `$${Number(v ?? 0).toFixed(2)}`;
 	}
 
-	function openCreate() {
+	async function ensureCombosLoaded() {
+		// si el usuario abre el modal antes de cargar, garantizamos
+		if (!categoriasLoadedOnce.value) await loadCategorias();
+		if (!proveedoresLoadedOnce.value) await loadProveedores();
+	}
+
+	async function openCreate() {
 		apiError.value = "";
 		mode.value = "create";
 		editingIdProducto.value = null;
+
 		Object.assign(form, emptyForm());
+
+		await ensureCombosLoaded();
+
+		// defaults “bonitos”
+		if (categorias.value.length) form.idCategoria = Number(categorias.value[0].idCategoria);
+		if (proveedores.value.length) form.idProveedor = Number(proveedores.value[0].idProveedor);
+
 		isOpen.value = true;
 	}
 
-	function openEdit(p) {
+	async function openEdit(p) {
 		apiError.value = "";
 
 		const id = p?.idProducto ?? null;
@@ -300,13 +528,15 @@
 		mode.value = "edit";
 		editingIdProducto.value = id;
 
+		await ensureCombosLoaded();
+
 		Object.assign(form, emptyForm(), {
 			idProducto: id,
 			codigo: p.codigo ?? "",
 			nombre: p.nombre ?? "",
 			descripcion: p.descripcion ?? "",
-			idCategoria: Number(p.idCategoria ?? 0),
-			idProveedor: Number(p.idProveedor ?? 0),
+			idCategoria: Number(p.idCategoria ?? p.IdCategoria ?? 0),
+			idProveedor: Number(p.idProveedor ?? p.IdProveedor ?? 0),
 			precioCompra: Number(p.precioCompra ?? 0),
 			precioVenta: Number(p.precioVenta ?? 0),
 			stockActual: Number(p.stockActual ?? 0),
@@ -322,20 +552,11 @@
 
 	function validate() {
 		if (!form.codigo || !form.nombre) return "Código y Nombre son obligatorios.";
-		if (Number(form.idCategoria) <= 0) return "ID Categoría debe ser > 0.";
-		if (Number(form.idProveedor) <= 0) return "ID Proveedor debe ser > 0.";
+		if (Number(form.idCategoria) <= 0) return "Debes seleccionar una Categoría.";
+		if (Number(form.idProveedor) <= 0) return "Debes seleccionar un Proveedor.";
 		if (Number(form.precioCompra) < 0 || Number(form.precioVenta) < 0) return "Los precios no pueden ser negativos.";
 		if (Number(form.stockActual) < 0 || Number(form.stockMinimo) < 0) return "El stock no puede ser negativo.";
 		return "";
-	}
-
-	async function readApiError(res) {
-		let msg = `Error (${res.status}).`;
-		try {
-			const data = await res.json();
-			msg = data.message || data.msg || data.error || JSON.stringify(data);
-		} catch { }
-		return new Error(msg);
 	}
 
 	async function saveProduct() {
@@ -360,7 +581,6 @@
 				stockMinimo: Number(form.stockMinimo),
 			};
 
-			// CREATE
 			if (mode.value === "create") {
 				const res = await fetch(PRODUCTS_ENDPOINT, {
 					method: "POST",
@@ -370,13 +590,8 @@
 				if (!res.ok) throw await readApiError(res);
 
 				let created = null;
-				try {
-					created = await res.json();
-				} catch {
-					created = null;
-				}
+				try { created = await res.json(); } catch { created = null; }
 
-				// si API no devuelve el objeto, recargamos lista
 				if (!created || !created.idProducto) {
 					await loadProducts();
 				} else {
@@ -387,7 +602,6 @@
 				return;
 			}
 
-			// EDIT
 			if (!editingIdProducto.value) {
 				apiError.value = "No hay idProducto para editar.";
 				return;
@@ -401,7 +615,6 @@
 			});
 			if (!res.ok) throw await readApiError(res);
 
-			// muchos PUT devuelven 204 No Content: en ese caso recargamos
 			if (res.status === 204) {
 				await loadProducts();
 				closeModal();
@@ -458,6 +671,14 @@
 
 	.content {
 		padding: 22px;
+	}
+
+	/* ✅ miniWarn para combos (igual estilo que inventario) */
+	.miniWarn {
+		margin-top: 8px;
+		color: #b45309;
+		font-weight: 800;
+		font-size: 12px;
 	}
 
 	.hdr {
@@ -806,7 +1027,7 @@
 			color: #64748b;
 		}
 
-		.field input, .field textarea {
+		.field input, .field textarea, .field select {
 			width: 100%;
 			box-sizing: border-box;
 			border: 1px solid rgba(148,163,184,.55);
@@ -818,12 +1039,21 @@
 			transition: border-color .15s ease, box-shadow .15s ease;
 		}
 
+		/* ✅ flechita en select para mantener estilo */
+		.field select {
+			appearance: none;
+			background-image: linear-gradient(45deg, transparent 50%, #64748b 50%), linear-gradient(135deg, #64748b 50%, transparent 50%);
+			background-position: calc(100% - 18px) calc(50% + 1px), calc(100% - 12px) calc(50% + 1px);
+			background-size: 6px 6px, 6px 6px;
+			background-repeat: no-repeat;
+		}
+
 		.field textarea {
 			resize: vertical;
 			min-height: 110px;
 		}
 
-			.field input:focus, .field textarea:focus {
+			.field input:focus, .field textarea:focus, .field select:focus {
 				border-color: rgba(59,130,246,.65);
 				box-shadow: 0 0 0 3px rgba(59,130,246,.18);
 			}
