@@ -1,6 +1,7 @@
 ﻿using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace StockMaster.Domain.Entities
 {
@@ -15,7 +16,7 @@ namespace StockMaster.Domain.Entities
 
         [Required]
         [MaxLength(10)]
-        public string Tipo { get; set; } = string.Empty; 
+        public string Tipo { get; set; } = string.Empty;
 
         [Required]
         public int IdProducto { get; set; }
@@ -34,9 +35,13 @@ namespace StockMaster.Domain.Entities
         [Required]
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-       
+        [JsonIgnore]
         public Producto? Producto { get; set; }
+
+        [JsonIgnore]
         public MotivoMovimiento? Motivo { get; set; }
+
+        [JsonIgnore]
         public Usuario? Usuario { get; set; }
     }
 }

@@ -1,12 +1,10 @@
 <template>
     <div class="dash">
-        <!-- ERROR -->
         <div v-if="error" class="apiErr">
             {{ error }}
             <button class="retry" type="button" @click="loadAll" :disabled="loading">Reintentar</button>
         </div>
 
-        <!-- KPIs -->
         <div class="kpis">
             <div class="kpi k1">
                 <div class="kpi-ic">
@@ -62,14 +60,21 @@
             </div>
         </div>
 
-        <!-- Chart -->
         <div class="card chart">
             <div class="card-head">
                 <div class="h">Resumen General del Inventario</div>
-                <button class="dd" type="button" @click="toggleRange">
-                    Últimos {{ rangeMonths }} meses
-                    <span class="chev">⌄</span>
-                </button>
+
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <!-- ✅ LOGOUT -->
+                    <button class="dd" type="button" @click="logout" :disabled="loggingOut">
+                        {{ loggingOut ? "Saliendo..." : "Log out" }}
+                    </button>
+
+                    <button class="dd" type="button" @click="toggleRange">
+                        Últimos {{ rangeMonths }} meses
+                        <span class="chev">⌄</span>
+                    </button>
+                </div>
             </div>
 
             <div class="chart-body">
@@ -83,13 +88,11 @@
                             <line v-for="y in 5" :key="'gy'+y" :x1="0" :x2="920" :y1="y*38" :y2="y*38" />
                         </g>
 
-                        <!-- green -->
                         <polyline :points="toPoints(entradasSeries)" class="line g" />
                         <g>
                             <circle v-for="(p,i) in entradasPts" :key="'eg'+i" :cx="p.x" :cy="p.y" r="5" class="dot dg" />
                         </g>
 
-                        <!-- blue -->
                         <polyline :points="toPoints(salidasSeries)" class="line b" />
                         <g>
                             <circle v-for="(p,i) in salidasPts" :key="'eb'+i" :cx="p.x" :cy="p.y" r="5" class="dot db" />
@@ -108,7 +111,6 @@
             </div>
         </div>
 
-        <!-- Bottom -->
         <div class="bottom">
             <div class="card">
                 <div class="card-head">
@@ -133,7 +135,6 @@
                             </div>
                         </div>
 
-                        <!-- ✅ ARREGLADO: ya no imprime objeto -->
                         <div class="mut">{{ p.categoriaNombre }}</div>
 
                         <div class="r strong">{{ p.stock }}</div>
@@ -171,7 +172,7 @@
                         <div>
                             <span class="pill" :class="m.tipo==='Entrada' ? 'in' : 'out'">{{ m.tipo }}</span>
                         </div>
-                        <div class="mut">- {{ m.producto }}</div>
+                        <div class="mut">{{ m.producto }}</div>
                         <div class="mut">{{ m.motivo }}</div>
                         <div class="mut">{{ m.responsable }}</div>
                     </div>
@@ -192,22 +193,35 @@
 
 <script setup>
     import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+    import { useRouter } from "vue-router";
 
-    /** =========================
-     *  API (AJUSTA SI CAMBIA)
-     *  ========================= */
+    const router = useRouter();
+
     const API_BASE = "https://localhost:7198";
     const PRODUCTOS_ENDPOINT = `${API_BASE}/api/Productos`;
     const MOVS_ENDPOINT = `${API_BASE}/api/Movimientos`;
     const DASH_ENDPOINT = `${API_BASE}/api/Dashboard`;
 
-    /** =========================
-     *  STATE
-     *  ========================= */
+    const USUARIOS_ENDPOINTS = [
+        `${API_BASE}/api/Usuarios`,
+        `${API_BASE}/api/Usuario`,
+        `${API_BASE}/api/Users`,
+        `${API_BASE}/api/UsuariosSistema`,
+    ];
+
+    const MOTIVOS_ENDPOINTS = [
+        `${API_BASE}/api/Motivos`,
+        `${API_BASE}/api/Motivo`,
+        `${API_BASE}/api/MotivosMovimiento`,
+        `${API_BASE}/api/MotivoMovimiento`,
+    ];
+
     const loading = ref(false);
     const error = ref("");
 
     const productos = ref([]);
+    const usuarios = ref([]);
+    const motivos = ref([]);
     const movimientosRaw = ref([]);
 
     const rangeMonths = ref(6);
@@ -228,21 +242,89 @@
     });
 
     let alive = true;
-    onBeforeUnmount(() => { alive = false; });
-
-    onMounted(() => {
-        loadAll();
+    onBeforeUnmount(() => {
+        alive = false;
     });
+    onMounted(() => loadAll());
 
     /** =========================
-     *  HELPERS
-     *  ========================= */
+     * ✅ LOGOUT (SIEMPRE REDIRIGE)
+     * ========================= */
+    const loggingOut = ref(false);
+
+    function clearAuthStorage() {
+        // borra TODO lo que huela a sesión (por si tu app usa nombres distintos)
+        const keys = [
+            "token",
+            "access_token",
+            "authToken",
+            "jwt",
+            "user",
+            "usuario",
+            "auth",
+            "session",
+            "refreshToken",
+        ];
+
+        keys.forEach((k) => {
+            localStorage.removeItem(k);
+            sessionStorage.removeItem(k);
+        });
+
+        // si guardaste algo con prefijo
+        for (const k of Object.keys(localStorage)) {
+            if (k.toLowerCase().includes("token") || k.toLowerCase().includes("auth") || k.toLowerCase().includes("user")) {
+                localStorage.removeItem(k);
+            }
+        }
+        for (const k of Object.keys(sessionStorage)) {
+            if (k.toLowerCase().includes("token") || k.toLowerCase().includes("auth") || k.toLowerCase().includes("user")) {
+                sessionStorage.removeItem(k);
+            }
+        }
+    }
+
+    async function logout() {
+        if (loggingOut.value) return;
+        loggingOut.value = true;
+
+        try {
+            // (opcional) si tienes endpoint real:
+            // await fetch(`${API_BASE}/api/Auth/logout`, { method: "POST" });
+
+            clearAuthStorage();
+
+            // fuerza navegación (aunque router esté “raro”)
+            try {
+                await router.replace({ path: "/login" });
+            } catch {
+                // fallback duro
+                window.location.href = "/login";
+                return;
+            }
+
+            // por si hay guards que “devuelven” al dashboard, forzamos recarga en login
+            setTimeout(() => {
+                if (window.location.pathname !== "/login") {
+                    window.location.replace("/login");
+                }
+            }, 50);
+        } finally {
+            loggingOut.value = false;
+        }
+    }
+
+    /** =========================
+     * HELPERS
+     * ========================= */
     function normalizeList(data) {
         if (Array.isArray(data)) return data;
+        if (Array.isArray(data?.$values)) return data.$values;
         if (Array.isArray(data?.items)) return data.items;
         if (Array.isArray(data?.data)) return data.data;
         if (Array.isArray(data?.result)) return data.result;
         if (Array.isArray(data?.value)) return data.value;
+        if (Array.isArray(data?.results)) return data.results;
         return [];
     }
 
@@ -262,48 +344,9 @@
         return map[dt.getMonth()];
     }
 
-    function safeString(v) {
-        if (v == null) return "";
-        if (typeof v === "string") return v;
-        if (typeof v === "number" || typeof v === "boolean") return String(v);
-        if (typeof v === "object") {
-            // evita "[object Object]" en UI
-            return v?.nombre ?? v?.name ?? v?.descripcion ?? v?.description ?? "";
-        }
-        return String(v);
-    }
-
-    function extractCategoriaNombre(raw) {
-        // En tu screenshot "categoría" viene como OBJETO dentro del producto
-        // { idCategoria, nombre, descripcion, ... }
-        const c =
-            raw?.categoria ??
-            raw?.Categoria ??
-            raw?.category ??
-            raw?.categoriaDto ??
-            null;
-
-        // si viene objeto
-        if (c && typeof c === "object") {
-            return (
-                safeString(c?.nombre) ||
-                safeString(c?.name) ||
-                safeString(c?.descripcion) ||
-                "—"
-            );
-        }
-
-        // si viene string
-        const asStr = safeString(raw?.categoriaNombre || raw?.categoryName || c);
-        if (asStr && asStr.trim()) return asStr.trim();
-
-        // si solo tenemos el id
-        const id = raw?.idCategoria ?? raw?.categoriaId ?? raw?.IdCategoria ?? null;
-        return id ? `ID ${id}` : "—";
-    }
-
     async function fetchJson(url, opts = {}) {
         const res = await fetch(url, opts);
+
         if (!res.ok) {
             let msg = `${res.status} ${res.statusText}`;
             try {
@@ -316,7 +359,7 @@
                     if (t?.trim()) msg = `${msg}: ${t}`;
                 }
             } catch { }
-            throw new Error(msg);
+            throw new Error(`${msg} [${url}]`);
         }
 
         const ct = res.headers.get("content-type") || "";
@@ -326,47 +369,193 @@
         return text ? JSON.parse(text) : null;
     }
 
-    /** =========================
-     *  NORMALIZERS (ARREGLADOS)
-     *  ========================= */
-    function normalizeProducto(p, idx) {
-        const id = p?.idProducto ?? p?.id ?? p?.productoId ?? p?.codigo ?? idx;
-        const nombre = p?.nombre ?? p?.descripcion ?? p?.name ?? "";
-        const stock = toNumber(p?.stockActual ?? p?.stock ?? p?.existencia ?? p?.cantidad ?? p?.qty, 0);
-        const minimo = toNumber(p?.stockMinimo ?? p?.minimo ?? p?.minStock ?? p?.reorderLevel, 0);
+    async function fetchFirstList(endpoints) {
+        let lastErr = null;
 
-        // ✅ esto es lo que se estaba rompiendo en el dashboard:
-        // estabas guardando "categoria" como objeto, y luego el template lo imprimía tal cual.
+        for (const url of endpoints) {
+            try {
+                const data = await fetchJson(url);
+                return { url, list: normalizeList(data) };
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+
+        return { url: endpoints[0], list: [], error: lastErr?.message || "No se pudo cargar lista." };
+    }
+
+    /** ====== NORMALIZERS ====== */
+    function extractCategoriaNombre(raw) {
+        const c = raw?.categoria ?? raw?.Categoria ?? raw?.category ?? raw?.categoriaDto ?? null;
+
+        if (c && typeof c === "object") {
+            const name = c?.nombre ?? c?.name ?? c?.descripcion ?? c?.description ?? "";
+            return String(name || "—").trim();
+        }
+
+        const asStr = raw?.categoriaNombre || raw?.categoryName || c;
+        if (asStr && String(asStr).trim()) return String(asStr).trim();
+
+        const id = raw?.idCategoria ?? raw?.categoriaId ?? raw?.IdCategoria ?? null;
+        return id ? `ID ${id}` : "—";
+    }
+
+    function normalizeProducto(p, idx) {
+        const id = p?.idProducto ?? p?.IdProducto ?? p?.id ?? p?.Id ?? p?.productoId ?? idx;
+        const nombre = p?.nombre ?? p?.Nombre ?? p?.descripcion ?? p?.Descripcion ?? p?.name ?? "";
+        const stock = toNumber(p?.stockActual ?? p?.StockActual ?? p?.stock ?? p?.existencia ?? p?.cantidad ?? p?.qty, 0);
+        const minimo = toNumber(p?.stockMinimo ?? p?.StockMinimo ?? p?.minimo ?? p?.minStock ?? p?.reorderLevel, 0);
         const categoriaNombre = extractCategoriaNombre(p);
 
-        return { id, nombre, categoriaNombre, stock, minimo, _raw: p };
+        return { id: Number(id), nombre: String(nombre ?? "").trim(), categoriaNombre, stock, minimo, _raw: p };
+    }
+
+    function normalizeUsuario(u, idx) {
+        const id = u?.idUsuario ?? u?.IdUsuario ?? u?.id ?? u?.Id ?? idx;
+        const nombreCompleto =
+            u?.nombreCompleto ??
+            u?.NombreCompleto ??
+            u?.nombre ??
+            u?.Nombre ??
+            u?.username ??
+            u?.Username ??
+            u?.email ??
+            u?.Email ??
+            "";
+
+        return { id: Number(id), nombre: String(nombreCompleto ?? "").trim(), _raw: u };
+    }
+
+    function normalizeMotivo(mm, idx) {
+        const id =
+            mm?.idMotivo ??
+            mm?.IdMotivo ??
+            mm?.id ??
+            mm?.Id ??
+            mm?.idMotivoMovimiento ??
+            mm?.IdMotivoMovimiento ??
+            idx;
+
+        const nombre = mm?.nombre ?? mm?.Nombre ?? mm?.descripcion ?? mm?.Descripcion ?? "";
+        return { id: Number(id), nombre: String(nombre ?? "").trim(), _raw: mm };
     }
 
     function normalizeMovimiento(m, idx) {
-        const id = m?.idMovimiento ?? m?.id ?? m?.movimientoId ?? idx;
+        const id = m?.idMovimiento ?? m?.IdMovimiento ?? m?.id ?? m?.movimientoId ?? idx;
 
-        const rawDate = m?.fecha ?? m?.createdAt ?? m?.fechaMovimiento ?? m?.date ?? null;
+        const rawDate = m?.fecha ?? m?.Fecha ?? m?.createdAt ?? m?.CreatedAt ?? m?.fechaMovimiento ?? m?.date ?? null;
         const dt = rawDate ? new Date(rawDate) : null;
         const fecha =
             dt && !isNaN(dt.getTime())
                 ? dt.toLocaleDateString("es-DO", { day: "2-digit", month: "short", year: "numeric" })
                 : "-";
 
-        const tipoRaw = String(m?.tipo ?? m?.tipoMovimiento ?? m?.movementType ?? "").toLowerCase();
-        const tipo = tipoRaw.includes("entr") || tipoRaw === "in" ? "Entrada" : "Salida";
+        let tipo = m?.tipo ?? m?.Tipo ?? m?.tipoMovimiento ?? m?.movementType ?? "Entrada";
+        if (typeof tipo === "number") tipo = tipo === 1 ? "Entrada" : "Salida";
+        if (typeof tipo === "string") {
+            const t = tipo.toLowerCase();
+            if (t.startsWith("e")) tipo = "Entrada";
+            else if (t.startsWith("s")) tipo = "Salida";
+            else if (t === "entrada" || t === "salida") tipo = t[0].toUpperCase() + t.slice(1);
+        }
 
-        const producto = m?.producto ?? m?.productoNombre ?? m?.nombreProducto ?? m?.item ?? "";
-        const motivo = m?.motivo ?? m?.comentario ?? m?.reason ?? "";
-        const responsable = m?.responsable ?? m?.usuario ?? m?.user ?? m?.createdBy ?? "";
+        const idProducto = Number(m?.idProducto ?? m?.IdProducto ?? m?.productoId ?? 0) || null;
+        const idUsuario = Number(m?.idUsuario ?? m?.IdUsuario ?? m?.usuarioId ?? 0) || null;
 
-        const cantidad = toNumber(m?.cantidad ?? m?.qty ?? m?.cantidadMovimiento, 0);
+        const idMotivo =
+            Number(
+                m?.idMotivo ??
+                m?.IdMotivo ??
+                m?.idMotivoMovimiento ??
+                m?.IdMotivoMovimiento ??
+                m?.motivoId ??
+                0
+            ) || null;
 
-        return { id, fecha, tipo, producto, motivo, responsable, cantidad, _dt: dt, _raw: m };
+        const motivoDirecto =
+            m?.motivoNombre ??
+            m?.MotivoNombre ??
+            m?.motivo?.nombre ??
+            m?.motivo?.descripcion ??
+            m?.Motivo?.Nombre ??
+            m?.motivo ??
+            m?.comentario ??
+            m?.reason ??
+            "";
+
+        return {
+            id,
+            fecha,
+            tipo,
+            idProducto,
+            idUsuario,
+            idMotivo,
+            motivo: String(motivoDirecto ?? "").trim() || "",
+            producto: "",
+            responsable: "",
+            cantidad: toNumber(m?.cantidad ?? m?.Cantidad ?? m?.qty ?? 0, 0),
+            _dt: dt,
+            _raw: m,
+        };
     }
 
-    /** =========================
-     *  LOAD
-     *  ========================= */
+    /** ====== RESOLVERS ====== */
+    function resolveProductoNombre(m) {
+        const direct =
+            m?._raw?.productoNombre ??
+            m?._raw?.ProductoNombre ??
+            m?._raw?.producto?.nombre ??
+            m?._raw?.Producto?.Nombre;
+
+        if (direct && String(direct).trim() && String(direct).trim() !== "-") return String(direct).trim();
+
+        const id = Number(m?.idProducto || m?._raw?.idProducto || m?._raw?.IdProducto);
+        if (!id) return "-";
+        const found = productos.value.find((p) => Number(p.id) === id);
+        return found?.nombre || `ID ${id}`;
+    }
+
+    function resolveUsuarioNombre(m) {
+        const direct =
+            m?._raw?.usuarioNombre ??
+            m?._raw?.UsuarioNombre ??
+            m?._raw?.usuario?.nombreCompleto ??
+            m?._raw?.Usuario?.NombreCompleto ??
+            m?._raw?.usuario?.username;
+
+        if (direct && String(direct).trim() && String(direct).trim() !== "-") return String(direct).trim();
+
+        const id = Number(m?.idUsuario || m?._raw?.idUsuario || m?._raw?.IdUsuario);
+        if (!id) return "-";
+        const found = usuarios.value.find((u) => Number(u.id) === id);
+        return found?.nombre || `ID ${id}`;
+    }
+
+    function resolveMotivoNombre(m) {
+        if (m?.motivo && String(m.motivo).trim() && String(m.motivo).trim() !== "-") return String(m.motivo).trim();
+
+        const direct =
+            m?._raw?.motivoNombre ??
+            m?._raw?.MotivoNombre ??
+            m?._raw?.motivo?.nombre ??
+            m?._raw?.motivo?.descripcion ??
+            m?._raw?.Motivo?.Nombre;
+
+        if (direct && String(direct).trim()) return String(direct).trim();
+
+        const id = Number(
+            m?.idMotivo ||
+            m?._raw?.idMotivo ||
+            m?._raw?.IdMotivo ||
+            m?._raw?.idMotivoMovimiento ||
+            m?._raw?.IdMotivoMovimiento
+        );
+        if (!id) return "-";
+        const found = motivos.value.find((x) => Number(x.id) === id);
+        return found?.nombre || `ID ${id}`;
+    }
+
+    /** ====== LOAD ====== */
     async function loadAll() {
         loading.value = true;
         error.value = "";
@@ -378,8 +567,19 @@
             } catch {
                 dash = null;
             }
+            if (!alive) return;
+
+            const [prodsRaw, usersPack, motivosPack] = await Promise.all([
+                fetchJson(PRODUCTOS_ENDPOINT),
+                fetchFirstList(USUARIOS_ENDPOINTS),
+                fetchFirstList(MOTIVOS_ENDPOINTS),
+            ]);
 
             if (!alive) return;
+
+            productos.value = normalizeList(prodsRaw).map((p, i) => normalizeProducto(p, i));
+            usuarios.value = normalizeList(usersPack.list).map((u, i) => normalizeUsuario(u, i)).filter((x) => x.id && x.nombre);
+            motivos.value = normalizeList(motivosPack.list).map((mm, i) => normalizeMotivo(mm, i)).filter((x) => x.id && x.nombre);
 
             if (dash) {
                 const k = dash?.kpis ?? {};
@@ -399,36 +599,31 @@
                 const lsItems = normalizeList(ls.items);
                 lowStockTotal.value = toNumber(ls.total, lsItems.length);
 
-                // ✅ aquí ya normalizamos correctamente la categoría (nombre)
-                lowStockRows.value = lsItems
-                    .map((p, i) => normalizeProducto(p, i))
-                    .filter((p) => p.nombre)
-                    .slice(0, 5);
+                lowStockRows.value = lsItems.map((p, i) => normalizeProducto(p, i)).filter((p) => p.nombre).slice(0, 5);
 
                 const mv = dash?.movimientos ?? {};
                 movRows.value = normalizeList(mv.items)
                     .map((m, i) => normalizeMovimiento(m, i))
-                    .filter((m) => m.producto || m.motivo || m.responsable || m._dt)
-                    .slice(0, 8);
+                    .slice(0, 8)
+                    .map((m) => ({
+                        ...m,
+                        producto: resolveProductoNombre(m),
+                        responsable: resolveUsuarioNombre(m),
+                        motivo: resolveMotivoNombre(m),
+                    }));
 
                 return;
             }
 
-            const [prodsRaw, movsRaw] = await Promise.all([
-                fetchJson(PRODUCTOS_ENDPOINT),
-                fetchJson(MOVS_ENDPOINT),
-            ]);
-
+            const movsRaw = await fetchJson(MOVS_ENDPOINT);
             if (!alive) return;
 
-            productos.value = normalizeList(prodsRaw).map((p, i) => normalizeProducto(p, i));
             movimientosRaw.value = normalizeList(movsRaw).map((m, i) => normalizeMovimiento(m, i));
 
             computeKPIs();
             computeLowStock();
             computeChartFromMovs();
             computeLastMovs();
-
         } catch (e) {
             if (!alive) return;
             error.value = e?.message ?? "Error cargando dashboard.";
@@ -437,9 +632,6 @@
         }
     }
 
-    /** =========================
-     *  COMPUTES
-     *  ========================= */
     function computeKPIs() {
         const totalProds = productos.value.length;
 
@@ -454,9 +646,7 @@
             .filter((x) => x._dt && x._dt >= from && x.tipo === "Salida")
             .reduce((a, x) => a + toNumber(x.cantidad, 0), 0);
 
-        const lowCount = productos.value
-            .filter((p) => p.minimo > 0 && p.stock <= p.minimo)
-            .length;
+        const lowCount = productos.value.filter((p) => p.minimo > 0 && p.stock <= p.minimo).length;
 
         kpis.value = {
             productosTotales: totalProds,
@@ -469,7 +659,7 @@
     function computeLowStock() {
         const list = productos.value
             .filter((p) => p.minimo > 0 && p.stock <= p.minimo && p.nombre)
-            .sort((a, b) => (a.stock - a.minimo) - (b.stock - b.minimo));
+            .sort((a, b) => a.stock - a.minimo - (b.stock - b.minimo));
 
         lowStockTotal.value = list.length;
         lowStockRows.value = list.slice(0, 5);
@@ -505,18 +695,23 @@
     }
 
     function computeLastMovs() {
-        movRows.value = [...movimientosRaw.value]
+        const list = [...movimientosRaw.value]
             .sort((a, b) => {
                 const ta = a._dt ? a._dt.getTime() : 0;
                 const tb = b._dt ? b._dt.getTime() : 0;
                 return tb - ta;
             })
             .slice(0, 8);
+
+        movRows.value = list.map((m) => ({
+            ...m,
+            producto: resolveProductoNombre(m),
+            responsable: resolveUsuarioNombre(m),
+            motivo: resolveMotivoNombre(m),
+        }));
     }
 
-    /** =========================
-     *  CHART GEOMETRY
-     *  ========================= */
+    /** ====== CHART HELPERS ====== */
     const W = 920, H = 230, PAD_TOP = 18, PAD_BOTTOM = 38, PAD_LR = 34;
 
     const maxY = computed(() => {
@@ -539,25 +734,14 @@
         return a.map((v, i) => `${mapX(i, a.length)},${mapY(v)}`).join(" ");
     }
 
-    const entradasPts = computed(() =>
-        entradasSeries.value.map((v, i) => ({ x: mapX(i, entradasSeries.value.length), y: mapY(v) }))
-    );
-    const salidasPts = computed(() =>
-        salidasSeries.value.map((v, i) => ({ x: mapX(i, salidasSeries.value.length), y: mapY(v) }))
-    );
+    const entradasPts = computed(() => entradasSeries.value.map((v, i) => ({ x: mapX(i, entradasSeries.value.length), y: mapY(v) })));
+    const salidasPts = computed(() => salidasSeries.value.map((v, i) => ({ x: mapX(i, salidasSeries.value.length), y: mapY(v) })));
 
     const yTicks = computed(() => {
         const m = Math.ceil(maxY.value);
-        const t1 = Math.ceil(m * 1.0);
-        const t2 = Math.ceil(m * 0.75);
-        const t3 = Math.ceil(m * 0.5);
-        const t4 = Math.ceil(m * 0.25);
-        return [t1, t2, t3, t4];
+        return [Math.ceil(m * 1.0), Math.ceil(m * 0.75), Math.ceil(m * 0.5), Math.ceil(m * 0.25)];
     });
 
-    /** =========================
-     *  UI
-     *  ========================= */
     function fmtSigned(n) {
         const v = toNumber(n, 0);
         const sign = v > 0 ? "+" : "";
@@ -575,7 +759,7 @@
 </script>
 
 <style scoped>
-    /* ✅ TU CSS IGUAL (sin cambios) */
+    /* (tu mismo CSS, sin cambios) */
     .dash {
         display: flex;
         flex-direction: column;
@@ -612,7 +796,7 @@
 
     .kpis {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0,1fr));
+        grid-template-columns: repeat(4,minmax(0,1fr));
         gap: 14px;
     }
 
@@ -968,9 +1152,9 @@
             border-color: rgba(239,68,68,.25);
         }
 
-    @media (max-width: 1100px) {
+    @media (max-width:1100px) {
         .kpis {
-            grid-template-columns: repeat(2, minmax(0,1fr));
+            grid-template-columns: repeat(2,minmax(0,1fr));
         }
 
         .bottom {

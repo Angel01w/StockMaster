@@ -96,7 +96,6 @@
 				</div>
 			</div>
 
-			<!-- MODAL -->
 			<div v-if="isOpen" class="modalOverlay" @click.self="closeModal">
 				<div class="modal" role="dialog" aria-modal="true">
 					<div class="modalHead">
@@ -126,7 +125,6 @@
 							<textarea v-model.trim="form.descripcion" rows="4"></textarea>
 						</div>
 
-						<!-- ✅ CAMBIO: SELECTS en vez de inputs -->
 						<div class="grid2">
 							<div class="field">
 								<label>Categoría</label>
@@ -166,24 +164,35 @@
 						<div class="grid2">
 							<div class="field">
 								<label>Precio Compra</label>
-								<input type="number" step="0.01" min="0" v-model.number="form.precioCompra" />
+								<input type="number" step="0.01" min="0" inputmode="decimal" v-model.number="form.precioCompra" />
 							</div>
 
 							<div class="field">
 								<label>Precio Venta</label>
-								<input type="number" step="0.01" min="0" v-model.number="form.precioVenta" />
+								<input type="number" step="0.01" min="0" inputmode="decimal" v-model.number="form.precioVenta" />
 							</div>
 						</div>
 
-						<div class="grid2">
-							<div class="field">
+						<div class="stockRow">
+							<div class="field half">
 								<label>Stock Actual</label>
-								<input type="number" min="0" step="1" v-model.number="form.stockActual" />
+								<input type="number"
+									   min="0"
+									   step="1"
+									   inputmode="numeric"
+									   autocomplete="off"
+									   :value="form.stockActual"
+									   @input="form.stockActual = $event.target.value === '' ? 0 : $event.target.valueAsNumber" />
 							</div>
 
-							<div class="field">
+							<div class="field half">
 								<label>Stock Mínimo</label>
-								<input type="number" min="0" step="1" v-model.number="form.stockMinimo" />
+								<input type="number"
+									   min="0"
+									   step="1"
+									   inputmode="numeric"
+									   :value="form.stockMinimo"
+									   @input="form.stockMinimo = $event.target.value === '' ? 0 : $event.target.valueAsNumber" />
 							</div>
 						</div>
 					</div>
@@ -197,7 +206,7 @@
 					</div>
 				</div>
 			</div>
-			<!-- /MODAL -->
+
 		</div>
 	</div>
 </template>
@@ -206,10 +215,8 @@
 	import { computed, onMounted, reactive, ref } from "vue";
 
 	const API_BASE = "https://localhost:7198";
-
 	const PRODUCTS_ENDPOINT = `${API_BASE}/api/Productos`;
 
-	// ✅ NUEVO: endpoints para combos
 	const CATEGORIAS_ENDPOINTS = [
 		`${API_BASE}/api/Categorias`,
 		`${API_BASE}/api/Categoria`,
@@ -233,12 +240,11 @@
 	const viewAll = ref(false);
 	const pageSize = 3;
 
-	const mode = ref("create"); // "create" | "edit"
+	const mode = ref("create");
 	const editingIdProducto = ref(null);
 
 	const rows = ref([]);
 
-	// ✅ NUEVO: listas para selects
 	const categorias = ref([]);
 	const proveedores = ref([]);
 
@@ -267,13 +273,9 @@
 
 	onMounted(async () => {
 		await loadProducts();
-		// ✅ precarga combos (para que el modal abra con data)
 		await Promise.all([loadCategorias(), loadProveedores()]);
 	});
 
-	/** =======================
-	 * Helpers de lista (incluye $values)
-	 * ======================= */
 	function normalizeList(data) {
 		if (Array.isArray(data)) return data;
 		if (Array.isArray(data?.$values)) return data.$values;
@@ -337,9 +339,7 @@
 			if (!res.ok) throw new Error(`GET /api/Productos falló (${res.status})`);
 
 			const data = await res.json();
-			const list = normalizeList(data);
-
-			rows.value = list;
+			rows.value = normalizeList(data);
 		} catch (e) {
 			rows.value = [];
 			apiError.value = e?.message ?? "No se pudo cargar productos desde la API.";
@@ -362,10 +362,6 @@
 		return new Error(msg);
 	}
 
-	/**
-	 * ✅ igual que hicimos en Inventario/Roles:
-	 * intenta varias rutas típicas y normaliza estructura
-	 */
 	async function fetchFirstList(endpoints) {
 		let lastErr = null;
 
@@ -398,7 +394,6 @@
 				.map(normalizeCategoria)
 				.filter((x) => x.idCategoria != null && x.nombre);
 
-			// default al abrir modal
 			if (categorias.value.length && Number(form.idCategoria) <= 0) {
 				form.idCategoria = Number(categorias.value[0].idCategoria);
 			}
@@ -436,7 +431,6 @@
 		return String(p?.idProducto ?? p?.codigo ?? Math.random());
 	}
 
-	// ✅ ahora resuelve por lista local si la API no trae navegación
 	function categoriaNombre(p) {
 		const nested = p?.categoria?.nombre ?? p?.categoria?.Nombre;
 		if (nested) return nested;
@@ -495,7 +489,6 @@
 	}
 
 	async function ensureCombosLoaded() {
-		// si el usuario abre el modal antes de cargar, garantizamos
 		if (!categoriasLoadedOnce.value) await loadCategorias();
 		if (!proveedoresLoadedOnce.value) await loadProveedores();
 	}
@@ -509,7 +502,6 @@
 
 		await ensureCombosLoaded();
 
-		// defaults “bonitos”
 		if (categorias.value.length) form.idCategoria = Number(categorias.value[0].idCategoria);
 		if (proveedores.value.length) form.idProveedor = Number(proveedores.value[0].idProveedor);
 
@@ -663,7 +655,6 @@
 </script>
 
 <style scoped>
-	/* TU CSS queda igual (lo dejé intacto) */
 	.page {
 		min-height: 100vh;
 		background: #eef3ff;
@@ -673,7 +664,6 @@
 		padding: 22px;
 	}
 
-	/* ✅ miniWarn para combos (igual estilo que inventario) */
 	.miniWarn {
 		margin-top: 8px;
 		color: #b45309;
@@ -1037,9 +1027,9 @@
 			outline: none;
 			background: #fff;
 			transition: border-color .15s ease, box-shadow .15s ease;
+			pointer-events: auto;
 		}
 
-		/* ✅ flechita en select para mantener estilo */
 		.field select {
 			appearance: none;
 			background-image: linear-gradient(45deg, transparent 50%, #64748b 50%), linear-gradient(135deg, #64748b 50%, transparent 50%);
@@ -1106,9 +1096,34 @@
 		font-weight: 800;
 	}
 
+	.stockRow {
+		display: flex;
+		gap: 22px;
+		position: relative;
+		z-index: 50;
+		isolation: isolate;
+	}
+
+		.stockRow .half {
+			flex: 1;
+			min-width: 0;
+			position: relative;
+			z-index: 60;
+		}
+
+		.stockRow input {
+			position: relative;
+			z-index: 70;
+			pointer-events: auto;
+		}
+
 	@media (max-width: 980px) {
 		.grid2 {
 			grid-template-columns: 1fr;
+		}
+
+		.stockRow {
+			flex-direction: column;
 		}
 	}
 

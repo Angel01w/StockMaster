@@ -97,7 +97,7 @@
 						<div class="num">Cantidad</div>
 						<div>Motivo</div>
 						<div>Documento</div>
-						<div>Responsable</div>
+						<div>Usuario</div>
 					</div>
 
 					<div class="trow" v-for="m in filteredRows" :key="rowKey(m)">
@@ -110,9 +110,8 @@
 							</span>
 						</div>
 
-						<div class="prod">{{ m.producto }}</div>
+						<div class="prod">{{ m.productoNombre }}</div>
 						<div class="num qty">{{ m.cantidad }}</div>
-
 						<div class="muted">{{ motivoLabel(m) }}</div>
 
 						<div class="doc">
@@ -125,7 +124,7 @@
 							<span class="doc-txt">{{ m.documento || "-" }}</span>
 						</div>
 
-						<div class="muted">{{ m.responsable }}</div>
+						<div class="muted">{{ usuarioLabel(m) }}</div>
 					</div>
 
 					<div class="tfoot">
@@ -135,7 +134,6 @@
 				</div>
 			</div>
 
-			<!-- MODAL -->
 			<div v-if="isOpen" class="modalOverlay" @click.self="closeModal">
 				<div class="modal" role="dialog" aria-modal="true">
 					<div class="modalHead">
@@ -163,7 +161,19 @@
 
 						<div class="field">
 							<label>Producto</label>
-							<input v-model.trim="form.producto" placeholder="Nombre del producto" autocomplete="off" />
+							<select v-model.number="form.idProducto" :disabled="productosLoading">
+								<option :value="null" disabled>
+									{{ productosLoading ? "Cargando productos..." : "Seleccione un producto" }}
+								</option>
+								<option v-for="p in productos" :key="String(p.idProducto)" :value="Number(p.idProducto)">
+									{{ p.nombre }}
+								</option>
+							</select>
+
+							<div v-if="!productosLoading && productosLoadedOnce && productos.length === 0" class="miniWarn">
+								No hay productos registrados (api/Productos devolvió vacío).
+							</div>
+							<div v-else-if="productosError" class="miniWarn">{{ productosError }}</div>
 						</div>
 
 						<div class="grid2">
@@ -180,38 +190,49 @@
 
 						<div class="field">
 							<label>Motivo</label>
-							<select v-model.number="form.idMotivoMovimiento" :disabled="motivosLoading">
+							<select v-model.number="form.idMotivo" :disabled="motivosLoading">
 								<option :value="null" disabled>
 									{{ motivosLoading ? "Cargando motivos..." : "Seleccione un motivo" }}
 								</option>
-
-								<option v-for="mm in motivos" :key="String(mm.idMotivoMovimiento)" :value="Number(mm.idMotivoMovimiento)">
-									{{ mm.descripcion }}
+								<option v-for="mm in motivos" :key="String(mm.idMotivo)" :value="Number(mm.idMotivo)">
+									{{ mm.nombre }}
 								</option>
 							</select>
 
 							<div v-if="!motivosLoading && motivosLoadedOnce && motivos.length === 0" class="miniWarn">
-								No hay motivos registrados en la base de datos (api/MotivosMovimiento devolvió vacío).
+								No hay motivos registrados (api/Motivos devolvió vacío).
 							</div>
 							<div v-else-if="motivosError" class="miniWarn">{{ motivosError }}</div>
 						</div>
 
 						<div class="field">
-							<label>Responsable</label>
-							<input v-model.trim="form.responsable" placeholder="Ej: Admin" autocomplete="off" />
+							<label>Usuario</label>
+							<select v-model.number="form.idUsuario" :disabled="usuariosLoading">
+								<option :value="null" disabled>
+									{{ usuariosLoading ? "Cargando usuarios..." : "Seleccione un usuario" }}
+								</option>
+								<option v-for="u in usuarios" :key="String(u.idUsuario)" :value="Number(u.idUsuario)">
+									{{ u.nombreCompleto }}
+								</option>
+							</select>
+
+							<div v-if="!usuariosLoading && usuariosLoadedOnce && usuarios.length === 0" class="miniWarn">
+								No hay usuarios registrados (api/Usuarios devolvió vacío).
+							</div>
+							<div v-else-if="usuariosError" class="miniWarn">{{ usuariosError }}</div>
 						</div>
 					</div>
 
 					<div class="modalFoot">
 						<button class="btnLink" type="button" @click="closeModal">Cancelar</button>
 
-						<button class="btnPrimary" type="button" :disabled="saving || motivosLoading" @click="createMovement">
+						<button class="btnPrimary" type="button" :disabled="saving || motivosLoading || productosLoading || usuariosLoading" @click="createMovement">
 							{{ saving ? "Registrando..." : "Registrar Movimiento" }}
 						</button>
 					</div>
 				</div>
 			</div>
-			<!-- /MODAL -->
+
 		</div>
 	</div>
 </template>
@@ -221,13 +242,20 @@
 
 	const API_BASE = "https://localhost:7198";
 	const MOV_ENDPOINT = `${API_BASE}/api/Movimientos`;
+	const PRODUCTOS_ENDPOINT = `${API_BASE}/api/Productos`;
+
+	const USUARIOS_ENDPOINTS = [
+		`${API_BASE}/api/Usuarios`,
+		`${API_BASE}/api/Usuario`,
+		`${API_BASE}/api/Users`,
+		`${API_BASE}/api/UsuariosSistema`,
+	];
 
 	const MOTIVOS_ENDPOINTS = [
+		`${API_BASE}/api/Motivos`,
+		`${API_BASE}/api/Motivo`,
 		`${API_BASE}/api/MotivosMovimiento`,
 		`${API_BASE}/api/MotivoMovimiento`,
-		`${API_BASE}/api/MotivosMovimientos`,
-		`${API_BASE}/api/MotivosInventario`,
-		`${API_BASE}/api/InventarioMotivos`,
 	];
 
 	const search = ref("");
@@ -242,22 +270,29 @@
 
 	const rows = ref([]);
 
+	const productos = ref([]);
+	const productosError = ref("");
+	const productosLoading = ref(false);
+	const productosLoadedOnce = ref(false);
+
 	const motivos = ref([]);
 	const motivosError = ref("");
-
 	const motivosLoading = ref(false);
 	const motivosLoadedOnce = ref(false);
 
-	const motivosEndpointUsado = ref("");
+	const usuarios = ref([]);
+	const usuariosError = ref("");
+	const usuariosLoading = ref(false);
+	const usuariosLoadedOnce = ref(false);
 
 	const emptyForm = () => ({
 		fecha: toDateInputValue(new Date()),
 		tipo: "Entrada",
-		producto: "",
+		idProducto: null,
 		cantidad: 0,
-		idMotivoMovimiento: null,
+		idMotivo: null,
 		documento: "",
-		responsable: "Admin",
+		idUsuario: null,
 	});
 	const form = reactive(emptyForm());
 
@@ -269,7 +304,7 @@
 		loading.value = true;
 		loadError.value = "";
 		try {
-			await loadMotivos();
+			await Promise.all([loadProductos(), loadMotivos(), loadUsuarios()]);
 			await loadMovimientos();
 		} catch (e) {
 			loadError.value = e?.message ?? "Error cargando inventario.";
@@ -278,68 +313,62 @@
 		}
 	}
 
-	/** =======================
-	 * NORMALIZERS
-	 * ======================= */
-
-	// ✅ AGREGADO: soporte $values (muy típico en .NET si ReferenceHandler.Preserve)
 	function normalizeList(data) {
 		if (Array.isArray(data)) return data;
-
-		// ASP.NET preserve references
 		if (Array.isArray(data?.$values)) return data.$values;
-
 		if (Array.isArray(data?.items)) return data.items;
 		if (Array.isArray(data?.data)) return data.data;
 		if (Array.isArray(data?.result)) return data.result;
 		if (Array.isArray(data?.value)) return data.value;
 		if (Array.isArray(data?.results)) return data.results;
-
 		return [];
 	}
 
-	// ✅ FIX REAL: tu tabla trae IdMotivo, Nombre, TipoAplica
-	function normalizeMotivo(x) {
-		const idMotivoMovimiento =
-			x?.idMotivoMovimiento ??
-			x?.motivoMovimientoId ??
-			x?.MotivoMovimientoId ??
-			x?.IdMotivoMovimiento ??
-			x?.IdMotivo ??           // ✅ NEW (SQL)
-			x?.idMotivo ??           // ✅ NEW (posible DTO)
-			x?.id ??
-			x?.Id ??
-			null;
-
-		const descripcion =
-			x?.descripcion ??
-			x?.Descripcion ??
-			x?.nombre ??
-			x?.Nombre ??             // ✅ NEW (SQL)
-			x?.motivo ??
-			x?.Motivo ??
-			"";
-
-		// opcional por si luego filtras por tipo aplica
-		const tipoAplica =
-			x?.tipoAplica ??
-			x?.TipoAplica ??
-			x?.aplica ??
-			x?.Aplica ??
-			null;
-
+	function normalizeProducto(p) {
+		const idProducto = p?.idProducto ?? p?.IdProducto ?? p?.id ?? p?.Id ?? null;
+		const nombre = p?.nombre ?? p?.Nombre ?? p?.name ?? p?.descripcion ?? p?.Descripcion ?? "";
 		return {
-			...x,
-			idMotivoMovimiento: idMotivoMovimiento != null ? Number(idMotivoMovimiento) : null,
-			descripcion: String(descripcion ?? "").trim(),
+			...p,
+			idProducto: idProducto != null ? Number(idProducto) : null,
+			nombre: String(nombre ?? "").trim(),
+		};
+	}
+
+	function normalizeMotivo(m) {
+		const idMotivo = m?.idMotivo ?? m?.IdMotivo ?? m?.id ?? m?.Id ?? m?.idMotivoMovimiento ?? m?.IdMotivoMovimiento ?? null;
+		const nombre = m?.nombre ?? m?.Nombre ?? m?.descripcion ?? m?.Descripcion ?? "";
+		const tipoAplica = m?.tipoAplica ?? m?.TipoAplica ?? null;
+		return {
+			...m,
+			idMotivo: idMotivo != null ? Number(idMotivo) : null,
+			nombre: String(nombre ?? "").trim(),
 			tipoAplica,
 		};
 	}
 
-	function normalizeMovement(m) {
-		const fecha = m?.fecha ?? m?.fechaMovimiento ?? m?.createdAt ?? m?.date ?? null;
+	function normalizeUsuario(u) {
+		const idUsuario = u?.idUsuario ?? u?.IdUsuario ?? u?.id ?? u?.Id ?? null;
+		const nombreCompleto =
+			u?.nombreCompleto ??
+			u?.NombreCompleto ??
+			u?.nombre ??
+			u?.Nombre ??
+			u?.username ??
+			u?.Username ??
+			u?.email ??
+			u?.Email ??
+			"";
+		return {
+			...u,
+			idUsuario: idUsuario != null ? Number(idUsuario) : null,
+			nombreCompleto: String(nombreCompleto ?? "").trim(),
+		};
+	}
 
-		let tipo = m?.tipo ?? m?.type ?? m?.tipoMovimiento ?? m?.Tipo ?? "Entrada";
+	function normalizeMovement(m) {
+		const fecha = m?.fecha ?? m?.Fecha ?? m?.createdAt ?? m?.CreatedAt ?? m?.date ?? null;
+
+		let tipo = m?.tipo ?? m?.Tipo ?? "Entrada";
 		if (typeof tipo === "number") tipo = tipo === 1 ? "Entrada" : "Salida";
 		if (typeof tipo === "string") {
 			const t = tipo.toLowerCase();
@@ -348,35 +377,47 @@
 			else if (t === "entrada" || t === "salida") tipo = t[0].toUpperCase() + t.slice(1);
 		}
 
-		const idMotivo =
-			m?.idMotivoMovimiento ??
-			m?.motivoMovimientoId ??
-			m?.IdMotivoMovimiento ??
-			m?.IdMotivo ??     // ✅ por si el backend manda IdMotivo
-			m?.idMotivo ??
-			m?.motivoId ??
-			m?.idMotivo ??
-			null;
+		const idProducto = m?.idProducto ?? m?.IdProducto ?? null;
+		const idMotivo = m?.idMotivo ?? m?.IdMotivo ?? null;
+		const idUsuario = m?.idUsuario ?? m?.IdUsuario ?? null;
 
-		const motivoTxt =
-			m?.motivo ??
-			m?.motivoDescripcion ??
-			m?.descripcionMotivo ??
-			m?.Motivo ??
-			m?.MotivoDescripcion ??
-			null;
+		const productoNombre =
+			m?.productoNombre ??
+			m?.ProductoNombre ??
+			m?.producto?.nombre ??
+			m?.Producto?.Nombre ??
+			"-";
+
+		const motivoNombre =
+			m?.motivoNombre ??
+			m?.MotivoNombre ??
+			m?.motivo?.nombre ??
+			m?.motivo?.descripcion ??
+			m?.Motivo?.Nombre ??
+			"";
+
+		const usuarioNombre =
+			m?.usuarioNombre ??
+			m?.UsuarioNombre ??
+			m?.usuario?.nombreCompleto ??
+			m?.Usuario?.NombreCompleto ??
+			m?.usuario?.username ??
+			"";
 
 		return {
 			...m,
-			idMovimiento: m?.idMovimiento ?? m?.movimientoId ?? m?.IdMovimiento ?? m?.id ?? null,
+			idMovimiento: m?.idMovimiento ?? m?.IdMovimiento ?? m?.id ?? null,
 			fecha: fecha ? normalizeDateString(fecha) : "",
 			tipo,
-			producto: m?.producto ?? m?.nombreProducto ?? m?.productName ?? m?.Producto ?? "",
-			cantidad: Number(m?.cantidad ?? m?.qty ?? m?.Cantidad ?? 0),
-			idMotivoMovimiento: idMotivo != null ? Number(idMotivo) : null,
-			motivo: motivoTxt,
-			documento: m?.documento ?? m?.doc ?? m?.Documento ?? "",
-			responsable: m?.responsable ?? m?.user ?? m?.Responsable ?? "",
+			idProducto: idProducto != null ? Number(idProducto) : null,
+			productoNombre: String(productoNombre ?? "-").trim(),
+			cantidad: Number(m?.cantidad ?? m?.Cantidad ?? 0),
+			idMotivo: idMotivo != null ? Number(idMotivo) : null,
+			motivoNombre: String(motivoNombre ?? "").trim(),
+			documento: m?.documento ?? m?.Documento ?? "",
+			idUsuario: idUsuario != null ? Number(idUsuario) : null,
+			usuarioNombre: String(usuarioNombre ?? "").trim(),
+			createdAt: m?.createdAt ?? m?.CreatedAt ?? null,
 		};
 	}
 
@@ -385,24 +426,24 @@
 		try { return new Date(v).toISOString().slice(0, 10); } catch { return String(v).slice(0, 10); }
 	}
 
-	/** =======================
-	 * RESOLVER MOTIVO
-	 * ======================= */
-	function resolveMotivoDescripcion(idMotivo) {
-		if (!idMotivo) return "";
-		const found = motivos.value.find((x) => Number(x.idMotivoMovimiento) === Number(idMotivo));
-		return found?.descripcion ?? "";
-	}
-
 	function motivoLabel(m) {
-		const txt = m?.motivo;
+		const txt = m?.motivoNombre;
 		if (txt && String(txt).trim()) return String(txt).trim();
-		return resolveMotivoDescripcion(m?.idMotivoMovimiento) || "-";
+		const id = Number(m?.idMotivo);
+		if (!id) return "-";
+		const found = motivos.value.find((x) => Number(x.idMotivo) === id);
+		return found?.nombre ?? "-";
 	}
 
-	/** =======================
-	 * HTTP HELPERS
-	 * ======================= */
+	function usuarioLabel(m) {
+		const txt = m?.usuarioNombre;
+		if (txt && String(txt).trim()) return String(txt).trim();
+		const id = Number(m?.idUsuario);
+		if (!id) return "-";
+		const found = usuarios.value.find((x) => Number(x.idUsuario) === id);
+		return found?.nombreCompleto ?? "-";
+	}
+
 	async function readApiError(res) {
 		let text = "";
 		try {
@@ -419,7 +460,7 @@
 			} else {
 				text = await res.text();
 			}
-		} catch {}
+		} catch { }
 
 		const msg = text?.trim()
 			? `${res.status} ${res.statusText}: ${text}`
@@ -434,16 +475,11 @@
 		for (const url of endpoints) {
 			try {
 				const res = await fetch(url);
-
 				if (!res.ok) {
 					lastErr = await readApiError(res);
 					continue;
 				}
-
-				if (res.status === 204) {
-					return { url, list: [] };
-				}
-
+				if (res.status === 204) return { url, list: [] };
 				const data = await res.json();
 				const list = normalizeList(data);
 				return { url, list };
@@ -455,26 +491,39 @@
 		throw (lastErr ?? new Error("No se pudo cargar la lista."));
 	}
 
-	/** =======================
-	 * LOADERS
-	 * ======================= */
+	async function loadProductos() {
+		productosLoading.value = true;
+		productosLoadedOnce.value = true;
+		productosError.value = "";
+		try {
+			const res = await fetch(PRODUCTOS_ENDPOINT);
+			if (!res.ok) throw await readApiError(res);
+			const data = await res.json();
+			const list = normalizeList(data);
+
+			productos.value = list.map(normalizeProducto).filter((p) => p.idProducto != null && p.nombre);
+
+			if (productos.value.length > 0 && form.idProducto == null) {
+				form.idProducto = Number(productos.value[0].idProducto);
+			}
+		} catch (e) {
+			productos.value = [];
+			productosError.value = e?.message ?? "No se pudieron cargar los productos.";
+		} finally {
+			productosLoading.value = false;
+		}
+	}
+
 	async function loadMotivos() {
 		motivosLoading.value = true;
 		motivosLoadedOnce.value = true;
 		motivosError.value = "";
-		motivosEndpointUsado.value = "";
-
 		try {
-			const { url, list } = await fetchFirstList(MOTIVOS_ENDPOINTS);
-			motivosEndpointUsado.value = url;
+			const { list } = await fetchFirstList(MOTIVOS_ENDPOINTS);
+			motivos.value = list.map(normalizeMotivo).filter((m) => m.idMotivo != null && m.nombre);
 
-			// ✅ ya normaliza IdMotivo/Nombre y no “bota” los registros
-			motivos.value = list
-				.map(normalizeMotivo)
-				.filter((x) => x.idMotivoMovimiento != null && String(x.descripcion ?? "").trim().length > 0);
-
-			if (motivos.value.length > 0 && form.idMotivoMovimiento == null) {
-				form.idMotivoMovimiento = Number(motivos.value[0].idMotivoMovimiento);
+			if (motivos.value.length > 0 && form.idMotivo == null) {
+				form.idMotivo = Number(motivos.value[0].idMotivo);
 			}
 		} catch (e) {
 			motivos.value = [];
@@ -484,30 +533,37 @@
 		}
 	}
 
+	async function loadUsuarios() {
+		usuariosLoading.value = true;
+		usuariosLoadedOnce.value = true;
+		usuariosError.value = "";
+		try {
+			const { list } = await fetchFirstList(USUARIOS_ENDPOINTS);
+			usuarios.value = list.map(normalizeUsuario).filter((u) => u.idUsuario != null && u.nombreCompleto);
+
+			if (usuarios.value.length > 0 && form.idUsuario == null) {
+				form.idUsuario = Number(usuarios.value[0].idUsuario);
+			}
+		} catch (e) {
+			usuarios.value = [];
+			usuariosError.value = e?.message ?? "No se pudieron cargar los usuarios.";
+		} finally {
+			usuariosLoading.value = false;
+		}
+	}
+
 	async function loadMovimientos() {
 		const res = await fetch(MOV_ENDPOINT);
 		if (!res.ok) throw await readApiError(res);
-
 		const data = await res.json();
 		const list = normalizeList(data);
-
 		rows.value = list.map(normalizeMovement);
 	}
 
-	/** =======================
-	 * KPIs
-	 * ======================= */
 	const totalMovimientos = computed(() => rows.value.length);
-	const totalEntradas = computed(() =>
-		rows.value.reduce((a, x) => a + (x.tipo === "Entrada" ? Number(x.cantidad) : 0), 0)
-	);
-	const totalSalidas = computed(() =>
-		rows.value.reduce((a, x) => a + (x.tipo === "Salida" ? Number(x.cantidad) : 0), 0)
-	);
+	const totalEntradas = computed(() => rows.value.reduce((a, x) => a + (x.tipo === "Entrada" ? Number(x.cantidad) : 0), 0));
+	const totalSalidas = computed(() => rows.value.reduce((a, x) => a + (x.tipo === "Salida" ? Number(x.cantidad) : 0), 0));
 
-	/** =======================
-	 * FILTERS
-	 * ======================= */
 	const filteredRows = computed(() => {
 		let list = rows.value;
 
@@ -521,25 +577,24 @@
 			return (
 				String(m.fecha ?? "").toLowerCase().includes(q) ||
 				String(m.tipo ?? "").toLowerCase().includes(q) ||
-				String(m.producto ?? "").toLowerCase().includes(q) ||
+				String(m.productoNombre ?? "").toLowerCase().includes(q) ||
 				String(motivoLabel(m) ?? "").toLowerCase().includes(q) ||
 				String(m.documento ?? "").toLowerCase().includes(q) ||
-				String(m.responsable ?? "").toLowerCase().includes(q)
+				String(usuarioLabel(m) ?? "").toLowerCase().includes(q)
 			);
 		});
 	});
 
-	/** =======================
-	 * UI
-	 * ======================= */
 	function rowKey(m) {
-		return String(m?.idMovimiento ?? `${m?.fecha}-${m?.tipo}-${m?.producto}-${m?.cantidad}`);
+		return String(m?.idMovimiento ?? `${m?.fecha}-${m?.tipo}-${m?.idProducto}-${m?.cantidad}-${m?.idUsuario}`);
 	}
 
 	function openCreate() {
 		apiError.value = "";
 		Object.assign(form, emptyForm(), {
-			idMotivoMovimiento: motivos.value?.[0]?.idMotivoMovimiento ?? null,
+			idProducto: productos.value?.[0]?.idProducto ?? null,
+			idMotivo: motivos.value?.[0]?.idMotivo ?? null,
+			idUsuario: usuarios.value?.[0]?.idUsuario ?? null,
 		});
 		isOpen.value = true;
 	}
@@ -548,21 +603,16 @@
 		isOpen.value = false;
 	}
 
-	/** =======================
-	 * VALIDATION
-	 * ======================= */
 	function validate() {
 		if (!form.fecha) return "La fecha es obligatoria.";
 		if (!form.tipo) return "El tipo es obligatorio.";
-		if (!form.producto) return "El producto es obligatorio.";
+		if (!form.idProducto) return "Debes seleccionar un producto.";
 		if (Number(form.cantidad) <= 0) return "La cantidad debe ser mayor que 0.";
-		if (!form.idMotivoMovimiento) return "Debes seleccionar un motivo.";
+		if (!form.idMotivo) return "Debes seleccionar un motivo.";
+		if (!form.idUsuario) return "Debes seleccionar un usuario.";
 		return "";
 	}
 
-	/** =======================
-	 * CREATE
-	 * ======================= */
 	async function createMovement() {
 		apiError.value = "";
 		const err = validate();
@@ -573,16 +623,11 @@
 			const payload = {
 				fecha: form.fecha,
 				tipo: form.tipo,
-				producto: form.producto,
+				idProducto: Number(form.idProducto),
 				cantidad: Number(form.cantidad),
-
-				// ✅ enviamos todas por compatibilidad
-				idMotivoMovimiento: Number(form.idMotivoMovimiento),
-				motivoMovimientoId: Number(form.idMotivoMovimiento),
-				idMotivo: Number(form.idMotivoMovimiento),  // ✅ por si tu backend usa IdMotivo
-
+				idMotivo: Number(form.idMotivo),
 				documento: form.documento || null,
-				responsable: form.responsable || null,
+				idUsuario: Number(form.idUsuario),
 			};
 
 			const res = await fetch(MOV_ENDPOINT, {
@@ -607,9 +652,6 @@
 		}
 	}
 
-	/** =======================
-	 * DATES
-	 * ======================= */
 	function formatDate(v) {
 		if (!v) return "";
 		if (typeof v === "string" && v.length >= 10) return v.slice(0, 10);
@@ -623,7 +665,6 @@
 </script>
 
 <style scoped>
-	/* tu CSS original + 2 utilidades */
 	.page {
 		min-height: 100vh;
 		background: #eef3ff;
@@ -646,7 +687,6 @@
 		font-size: 12px;
 	}
 
-	/* ---- tu CSS (sin cambios de estilo, copiado tal cual) ---- */
 	.hdr {
 		display: flex;
 		align-items: center;

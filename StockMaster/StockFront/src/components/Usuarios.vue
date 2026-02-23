@@ -1,39 +1,31 @@
 ﻿<template>
 	<div class="page">
 		<div class="content">
-			<!-- HEADER -->
 			<div class="hdr">
 				<div class="hdr-left">
 					<div class="cube">
 						<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-							<path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0Z"
-								  stroke="currentColor"
-								  stroke-width="1.8" />
-							<path d="M4 20c.7-3.4 4-5 8-5s7.3 1.6 8 5"
-								  stroke="currentColor"
-								  stroke-width="1.8"
+							<path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0Z" stroke="currentColor" stroke-width="1.8" />
+							<path d="M4 20c.7-3.4 4-5 8-5s7.3 1.6 8 5" stroke="currentColor" stroke-width="1.8"
 								  stroke-linecap="round" />
 						</svg>
 					</div>
 					<div class="h1">Gestión de Usuarios</div>
 				</div>
 
-				<button class="btn-primary" type="button" @click="openCreate">
+				<button v-if="isAdmin" class="btn-primary" type="button" @click="openCreate">
 					<span class="plus">＋</span>
 					Nuevo Usuario
 				</button>
 			</div>
 
-			<!-- LOAD ERROR -->
 			<div v-if="loadError" class="alert">{{ loadError }}</div>
 
-			<!-- SEARCH -->
 			<div class="search">
 				<div class="search-ic">🔍</div>
 				<input v-model="search" class="search-in" placeholder="Buscar usuarios..." />
 			</div>
 
-			<!-- STATS -->
 			<div class="stats4">
 				<div class="stat stat-soft">
 					<div class="stat-num blue">{{ totalUsuarios }}</div>
@@ -56,7 +48,6 @@
 				</div>
 			</div>
 
-			<!-- TABLE CARD -->
 			<div class="card">
 				<div v-if="loading" class="mutedLine">Cargando usuarios...</div>
 				<div v-else-if="filteredRows.length === 0" class="mutedLine">No hay usuarios para mostrar.</div>
@@ -72,7 +63,6 @@
 					</div>
 
 					<div class="trow usersRow" v-for="u in visibleRows" :key="rowKey(u)">
-						<!-- Usuario -->
 						<div class="uCell">
 							<div class="avatar" :class="avatarClass(u)">
 								<span>{{ avatarLetter(u) }}</span>
@@ -82,10 +72,8 @@
 							</div>
 						</div>
 
-						<!-- Email -->
 						<div class="muted">{{ (u.correo ?? u.email) ?? "-" }}</div>
 
-						<!-- Rol -->
 						<div>
 							<span class="chip" :class="roleChipClass(u)">
 								<span class="dot"></span>
@@ -93,24 +81,25 @@
 							</span>
 						</div>
 
-						<!-- Estado -->
 						<div class="state">
 							<span class="sDot" :class="isActive(u) ? 'on' : 'off'"></span>
 							<span class="muted2">{{ isActive(u) ? "Activo" : "Inactivo" }}</span>
 
-							<button class="miniBtn" type="button" @click="toggleEstado(u)">
+							<button v-if="isAdmin" class="miniBtn" type="button" @click="toggleEstado(u)">
 								{{ isActive(u) ? "Desactivar" : "Activar" }}
 							</button>
 						</div>
 
-						<!-- Último acceso -->
 						<div class="muted">{{ lastAccess(u) }}</div>
 
-						<!-- Acciones -->
-						<div class="actions">
+						<div class="actions" v-if="isAdmin">
 							<button class="icon-btn edit" type="button" title="Editar" aria-label="Editar" @click="openEdit(u)">✎</button>
 							<button class="icon-btn key" type="button" title="Cambiar password" aria-label="Cambiar password" @click="openPassword(u)">🔑</button>
 							<button class="icon-btn del" type="button" title="Eliminar" aria-label="Eliminar" @click="removeUser(u)">🗑</button>
+						</div>
+
+						<div class="actions" v-else>
+							<span class="muted">-</span>
 						</div>
 					</div>
 
@@ -124,8 +113,7 @@
 				</div>
 			</div>
 
-			<!-- MODAL CREATE/EDIT -->
-			<div v-if="isOpen" class="modalOverlay" @click.self="closeModal">
+			<div v-if="isOpen && isAdmin" class="modalOverlay" @click.self="closeModal">
 				<div class="modal" role="dialog" aria-modal="true">
 					<div class="modalHead">
 						<div class="modalTitle">{{ mode === "create" ? "Nuevo Usuario" : "Editar Usuario" }}</div>
@@ -136,13 +124,9 @@
 						<div v-if="apiError" class="alert">{{ apiError }}</div>
 
 						<div class="grid2">
-							<div class="field">
-								<label>Nombres</label>
-								<input v-model.trim="form.nombres" autocomplete="off" />
-							</div>
-							<div class="field">
-								<label>Apellidos</label>
-								<input v-model.trim="form.apellidos" autocomplete="off" />
+							<div class="field span2">
+								<label>Nombre Completo</label>
+								<input v-model.trim="form.nombreCompleto" autocomplete="off" placeholder="Ej: Juan Pérez" />
 							</div>
 						</div>
 
@@ -164,7 +148,6 @@
 									</option>
 								</select>
 
-								<!-- Mensaje útil si el endpoint devolvió 200 pero sin roles (o mapeo incorrecto) -->
 								<div v-if="!rolesLoading && rolesLoadedOnce && roles.length === 0" class="hint">
 									No hay roles registrados en la base de datos (api/Roles devolvió vacío).
 								</div>
@@ -179,7 +162,6 @@
 							</div>
 						</div>
 
-						<!-- password solo en create -->
 						<div v-if="mode === 'create'" class="grid2">
 							<div class="field">
 								<label>Contraseña</label>
@@ -201,9 +183,8 @@
 					</div>
 				</div>
 			</div>
-			<!-- /MODAL -->
-			<!-- MODAL PASSWORD -->
-			<div v-if="isPwdOpen" class="modalOverlay" @click.self="closePwd">
+
+			<div v-if="isPwdOpen && isAdmin" class="modalOverlay" @click.self="closePwd">
 				<div class="modal" role="dialog" aria-modal="true">
 					<div class="modalHead">
 						<div class="modalTitle">Cambiar Password</div>
@@ -238,7 +219,6 @@
 					</div>
 				</div>
 			</div>
-			<!-- /MODAL PASSWORD -->
 		</div>
 	</div>
 </template>
@@ -246,12 +226,15 @@
 <script setup>
 	import { computed, onMounted, reactive, ref } from "vue";
 
-	/** ===== API ===== */
+	const rawUser = localStorage.getItem("sm_user");
+	const sessionUser = rawUser ? JSON.parse(rawUser) : null;
+	const sessionRole = (sessionUser?.rol || "").toLowerCase();
+	const isAdmin = sessionRole === "admin";
+
 	const API_BASE = "https://localhost:7198";
 	const USERS_ENDPOINT = `${API_BASE}/api/Usuarios`;
 	const ROLES_ENDPOINT = `${API_BASE}/api/Roles`;
 
-	/** ===== STATE ===== */
 	const search = ref("");
 	const isOpen = ref(false);
 	const saving = ref(false);
@@ -263,17 +246,15 @@
 	const viewAll = ref(false);
 	const pageSize = 4;
 
-	const mode = ref("create"); // create | edit
+	const mode = ref("create");
 	const editingId = ref(null);
 
 	const rows = ref([]);
 	const roles = ref([]);
 
-	/** roles loading state (para UX) */
 	const rolesLoading = ref(false);
 	const rolesLoadedOnce = ref(false);
 
-	/** ===== PASSWORD MODAL ===== */
 	const isPwdOpen = ref(false);
 	const pwdSaving = ref(false);
 	const pwdError = ref("");
@@ -281,11 +262,9 @@
 	const pwdUserLabel = ref("");
 	const pwdForm = reactive({ password: "", password2: "" });
 
-	/** ===== FORM ===== */
 	const emptyForm = () => ({
 		idUsuario: null,
-		nombres: "",
-		apellidos: "",
+		nombreCompleto: "",
 		correo: "",
 		idRol: null,
 		estado: "Activo",
@@ -298,9 +277,7 @@
 		await loadAll();
 	});
 
-	/** ===== NORMALIZERS ===== */
 	function normalizeRole(r) {
-		// ✅ FIX: tu DB/Swagger puede devolver IdRole / idRole / idRol / IdRol
 		const idRol =
 			r?.idRol ??
 			r?.idRole ??
@@ -325,13 +302,9 @@
 	function normalizeUser(u) {
 		const idUsuario = u?.idUsuario ?? u?.id ?? u?.usuarioId ?? u?.userId ?? null;
 
-		const nombres = u?.nombres ?? u?.nombre ?? u?.firstName ?? "";
-		const apellidos = u?.apellidos ?? u?.apellido ?? u?.lastName ?? "";
-
 		const nombreCompleto =
-			u?.nombreCompleto ??
-			u?.fullName ??
-			`${nombres} ${apellidos}`.trim();
+			(u?.nombreCompleto ?? u?.fullName ?? u?.nombre ?? u?.NombreCompleto ?? u?.Nombre ?? "")?.toString().trim() ||
+			`${u?.nombres ?? ""} ${u?.apellidos ?? ""}`.trim();
 
 		const correo = u?.correo ?? u?.email ?? u?.mail ?? null;
 
@@ -349,7 +322,6 @@
 			u?.rol?.id ??
 			null;
 
-		// estado puede venir: "Activo"/"Inactivo", bool, 0/1
 		const estadoRaw = u?.estado ?? u?.activo ?? u?.isActive ?? u?.active ?? null;
 		const estadoStr = String(estadoRaw ?? "").toLowerCase();
 
@@ -369,8 +341,6 @@
 		return {
 			...u,
 			idUsuario,
-			nombres,
-			apellidos,
 			nombreCompleto,
 			correo,
 			idRol,
@@ -382,7 +352,6 @@
 	}
 
 	function normalizeList(data) {
-		// soporta: []  |  {items:[...]}  |  {data:[...]}  |  {result:[...]}
 		if (Array.isArray(data)) return data;
 		if (Array.isArray(data?.items)) return data.items;
 		if (Array.isArray(data?.data)) return data.data;
@@ -390,7 +359,6 @@
 		return [];
 	}
 
-	/** ===== HTTP HELPERS ===== */
 	async function readApiError(res) {
 		let text = "";
 		try {
@@ -416,7 +384,6 @@
 		return new Error(msg);
 	}
 
-	/** ===== LOADERS ===== */
 	async function loadAll() {
 		loading.value = true;
 		loadError.value = "";
@@ -442,9 +409,7 @@
 		const data = await res.json();
 		const list = normalizeList(data).map(normalizeRole);
 
-		// ✅ FIX: no “parece vacío” por mapeo, y no se cuelan nulls
 		roles.value = list.filter((x) => x.idRol != null);
-
 		rolesLoading.value = false;
 	}
 
@@ -455,7 +420,6 @@
 		rows.value = normalizeList(data).map(normalizeUser);
 	}
 
-	/** ===== UI HELPERS ===== */
 	function rowKey(u) {
 		return String(u?.idUsuario ?? u?.correo ?? u?.nombreCompleto ?? Math.random());
 	}
@@ -496,16 +460,10 @@
 		return u?.ultimoAcceso ? String(u.ultimoAcceso).slice(0, 10) : "-";
 	}
 
-	/** ✅ FIX: sin mezclar ?? con || */
 	function displayName(u) {
-		const byFull = u?.nombreCompleto ?? u?.fullName ?? null;
-		if (byFull && String(byFull).trim()) return String(byFull).trim();
-
-		const nombres = u?.nombres ?? "";
-		const apellidos = u?.apellidos ?? "";
-		const combined = `${nombres} ${apellidos}`.trim();
-
-		return combined || "Usuario";
+		const full = u?.nombreCompleto ?? u?.fullName ?? null;
+		if (full && String(full).trim()) return String(full).trim();
+		return "Usuario";
 	}
 
 	function avatarLetter(u) {
@@ -525,7 +483,6 @@
 		return "chip-user";
 	}
 
-	/** ===== KPIs ===== */
 	const totalUsuarios = computed(() => rows.value.length);
 	const totalAdmins = computed(() =>
 		rows.value.reduce((acc, u) => acc + (String(roleName(u)).toLowerCase().includes("admin") ? 1 : 0), 0)
@@ -537,8 +494,9 @@
 		rows.value.reduce((acc, u) => acc + (String(roleName(u)).toLowerCase().includes("audit") ? 1 : 0), 0)
 	);
 
-	/** ===== MODAL ACTIONS ===== */
 	function openCreate() {
+		if (!isAdmin) return;
+
 		apiError.value = "";
 		mode.value = "create";
 		editingId.value = null;
@@ -551,6 +509,8 @@
 	}
 
 	function openEdit(u) {
+		if (!isAdmin) return;
+
 		apiError.value = "";
 		mode.value = "edit";
 
@@ -562,8 +522,7 @@
 
 		Object.assign(form, emptyForm(), {
 			idUsuario: id,
-			nombres: u?.nombres ?? "",
-			apellidos: u?.apellidos ?? "",
+			nombreCompleto: (u?.nombreCompleto ?? displayName(u) ?? "").toString(),
 			correo: u?.correo ?? "",
 			idRol: u?.idRol ?? (roles.value?.[0]?.idRol ?? null),
 			estado: isActive(u) ? "Activo" : "Inactivo",
@@ -576,10 +535,8 @@
 		isOpen.value = false;
 	}
 
-	/** ===== VALIDATION ===== */
 	function validate() {
-		if (!form.nombres) return "Nombres es obligatorio.";
-		if (!form.apellidos) return "Apellidos es obligatorio.";
+		if (!form.nombreCompleto) return "Nombre Completo es obligatorio.";
 		if (!form.correo) return "Correo es obligatorio.";
 		if (!form.idRol) return "Debes seleccionar un Rol.";
 		if (!/^\S+@\S+\.\S+$/.test(form.correo)) return "Correo inválido.";
@@ -592,32 +549,66 @@
 		return "";
 	}
 
-	/** ===== API ACTIONS ===== */
+	function deriveUsernameFromEmail(email) {
+		const e = (email ?? "").toString().trim();
+		if (!e.includes("@")) return e || "user";
+		return e.split("@")[0] || "user";
+	}
+
+	function extractIdFromCreateResponse(obj) {
+		return obj?.idUsuario ?? obj?.id ?? obj?.usuarioId ?? obj?.userId ?? null;
+	}
+
+	function buildOptimisticUser(createdRaw) {
+		const id = extractIdFromCreateResponse(createdRaw);
+		const r = roles.value.find((x) => Number(x.idRol) === Number(form.idRol));
+
+		return normalizeUser({
+			...(createdRaw || {}),
+			idUsuario: id,
+			nombreCompleto: form.nombreCompleto,
+			fullName: form.nombreCompleto,
+			correo: form.correo,
+			email: form.correo,
+			idRol: Number(form.idRol),
+			idRole: Number(form.idRol),
+			rolNombre: r?.nombre ?? null,
+			activo: form.estado === "Activo",
+			estado: form.estado,
+		});
+	}
+
 	async function saveUser() {
+		if (!isAdmin) return;
+
 		apiError.value = "";
 		const err = validate();
-		if (err) { apiError.value = err; return; }
+		if (err) {
+			apiError.value = err;
+			return;
+		}
 
 		saving.value = true;
 		try {
-			// Payload “compatible” (tu API tomará lo que necesite)
+			const username = deriveUsernameFromEmail(form.correo);
+
 			const payload = {
-				idRol: Number(form.idRol),
-				idRole: Number(form.idRol), // por si tu backend usa ese nombre
-				correo: form.correo,
+				nombreCompleto: form.nombreCompleto,
+				fullName: form.nombreCompleto,
+				nombre: form.nombreCompleto,
 				email: form.correo,
-				nombres: form.nombres,
-				apellidos: form.apellidos,
+				correo: form.correo,
+				username,
+				idRole: Number(form.idRol),
+				idRol: Number(form.idRol),
 				estado: form.estado,
 				activo: form.estado === "Activo",
 			};
 
 			if (mode.value === "create") {
-				payload.contrasena = form.contrasena;
 				payload.password = form.contrasena;
-			}
+				payload.contrasena = form.contrasena;
 
-			if (mode.value === "create") {
 				const res = await fetch(USERS_ENDPOINT, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
@@ -625,13 +616,16 @@
 				});
 				if (!res.ok) throw await readApiError(res);
 
-				let created = null;
-				try { created = await res.json(); } catch { created = null; }
+				let createdRaw = null;
+				try {
+					createdRaw = await res.json();
+				} catch {
+					createdRaw = null;
+				}
 
-				if (created) rows.value.unshift(normalizeUser(created));
-				else await loadUsers();
-
+				rows.value.unshift(buildOptimisticUser(createdRaw));
 				closeModal();
+				await loadUsers();
 				return;
 			}
 
@@ -648,7 +642,11 @@
 			if (!res.ok) throw await readApiError(res);
 
 			let updated = null;
-			try { updated = await res.json(); } catch { updated = null; }
+			try {
+				updated = await res.json();
+			} catch {
+				updated = null;
+			}
 
 			if (updated) {
 				const n = normalizeUser(updated);
@@ -667,6 +665,8 @@
 	}
 
 	async function removeUser(u) {
+		if (!isAdmin) return;
+
 		const id = u?.idUsuario ?? null;
 		const name = displayName(u);
 
@@ -688,6 +688,8 @@
 	}
 
 	async function toggleEstado(u) {
+		if (!isAdmin) return;
+
 		const id = u?.idUsuario ?? null;
 		if (!id) return;
 
@@ -702,7 +704,11 @@
 			if (!res.ok) throw await readApiError(res);
 
 			let updated = null;
-			try { updated = await res.json(); } catch { updated = null; }
+			try {
+				updated = await res.json();
+			} catch {
+				updated = null;
+			}
 
 			if (updated) {
 				const n = normalizeUser(updated);
@@ -717,8 +723,9 @@
 		}
 	}
 
-	/** ===== PASSWORD ===== */
 	function openPassword(u) {
+		if (!isAdmin) return;
+
 		pwdError.value = "";
 		pwdSaving.value = false;
 
@@ -747,12 +754,20 @@
 	}
 
 	async function savePassword() {
+		if (!isAdmin) return;
+
 		pwdError.value = "";
 		const err = validatePwd();
-		if (err) { pwdError.value = err; return; }
+		if (err) {
+			pwdError.value = err;
+			return;
+		}
 
 		const id = pwdUserId.value;
-		if (!id) { pwdError.value = "No hay usuario seleccionado."; return; }
+		if (!id) {
+			pwdError.value = "No hay usuario seleccionado.";
+			return;
+		}
 
 		pwdSaving.value = true;
 		try {
@@ -788,7 +803,6 @@
 		padding: 10px 2px;
 	}
 
-	/* ===== Header ===== */
 	.hdr {
 		display: flex;
 		align-items: center;
@@ -807,8 +821,8 @@
 		width: 44px;
 		height: 44px;
 		border-radius: 14px;
-		background: rgba(99,102,241,.10);
-		border: 1px solid rgba(99,102,241,.16);
+		background: rgba(99, 102, 241, 0.10);
+		border: 1px solid rgba(99, 102, 241, 0.16);
 		display: grid;
 		place-items: center;
 		color: #6366f1;
@@ -832,8 +846,8 @@
 		border-radius: 12px;
 		color: #fff;
 		font-weight: 900;
-		background: linear-gradient(180deg,#2f74ff,#1e5ae9);
-		box-shadow: 0 14px 28px rgba(37,99,235,.25);
+		background: linear-gradient(180deg, #2f74ff, #1e5ae9);
+		box-shadow: 0 14px 28px rgba(37, 99, 235, 0.25);
 		display: flex;
 		align-items: center;
 		gap: 10px;
@@ -847,7 +861,6 @@
 		font-weight: 900;
 	}
 
-	/* ===== Search ===== */
 	.search {
 		height: 48px;
 		display: flex;
@@ -855,14 +868,14 @@
 		gap: 10px;
 		padding: 0 14px;
 		border-radius: 14px;
-		background: rgba(255,255,255,.92);
-		border: 1px solid rgba(15,23,42,.08);
-		box-shadow: 0 10px 22px rgba(10,20,70,.06);
+		background: rgba(255, 255, 255, 0.92);
+		border: 1px solid rgba(15, 23, 42, 0.08);
+		box-shadow: 0 10px 22px rgba(10, 20, 70, 0.06);
 		margin-bottom: 14px;
 	}
 
 	.search-ic {
-		opacity: .75;
+		opacity: 0.75;
 	}
 
 	.search-in {
@@ -874,10 +887,9 @@
 		color: #0f172a;
 	}
 
-	/* ===== Stats ===== */
 	.stats4 {
 		display: grid;
-		grid-template-columns: repeat(4,minmax(0,1fr));
+		grid-template-columns: repeat(4, minmax(0, 1fr));
 		gap: 14px;
 		margin-bottom: 16px;
 	}
@@ -885,24 +897,24 @@
 	.stat {
 		border-radius: 14px;
 		padding: 16px 18px;
-		border: 1px solid rgba(15,23,42,.06);
-		box-shadow: 0 12px 24px rgba(10,20,70,.06);
+		border: 1px solid rgba(15, 23, 42, 0.06);
+		box-shadow: 0 12px 24px rgba(10, 20, 70, 0.06);
 	}
 
 	.stat-soft {
-		background: rgba(255,255,255,.7);
+		background: rgba(255, 255, 255, 0.7);
 	}
 
 	.purpleBg {
-		background: rgba(124,58,237,.06);
+		background: rgba(124, 58, 237, 0.06);
 	}
 
 	.greenBg {
-		background: rgba(34,197,94,.06);
+		background: rgba(34, 197, 94, 0.06);
 	}
 
 	.orangeBg {
-		background: rgba(249,115,22,.06);
+		background: rgba(249, 115, 22, 0.06);
 	}
 
 	.stat-num {
@@ -933,12 +945,11 @@
 		color: #f97316;
 	}
 
-	/* ===== Card/Table ===== */
 	.card {
-		background: rgba(255,255,255,.92);
-		border: 1px solid rgba(15,23,42,.08);
+		background: rgba(255, 255, 255, 0.92);
+		border: 1px solid rgba(15, 23, 42, 0.08);
 		border-radius: 16px;
-		box-shadow: 0 16px 30px rgba(10,20,70,.08);
+		box-shadow: 0 16px 30px rgba(10, 20, 70, 0.08);
 		overflow: hidden;
 	}
 
@@ -953,8 +964,8 @@
 		color: #64748b;
 		font-weight: 900;
 		font-size: 12px;
-		border-bottom: 1px solid rgba(15,23,42,.06);
-		background: rgba(248,250,252,.7);
+		border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+		background: rgba(248, 250, 252, 0.7);
 		border-radius: 12px;
 	}
 
@@ -962,7 +973,7 @@
 		display: grid;
 		gap: 14px;
 		padding: 16px 12px;
-		border-bottom: 1px solid rgba(15,23,42,.05);
+		border-bottom: 1px solid rgba(15, 23, 42, 0.05);
 		align-items: center;
 		font-size: 13px;
 	}
@@ -1001,12 +1012,12 @@
 		width: 34px;
 		height: 34px;
 		border-radius: 10px;
-		border: 1px solid rgba(15,23,42,.10);
-		background: rgba(255,255,255,.95);
+		border: 1px solid rgba(15, 23, 42, 0.10);
+		background: rgba(255, 255, 255, 0.95);
 		cursor: pointer;
 		display: grid;
 		place-items: center;
-		box-shadow: 0 10px 18px rgba(10,20,70,.06);
+		box-shadow: 0 10px 18px rgba(10, 20, 70, 0.06);
 	}
 
 		.icon-btn.edit {
@@ -1021,7 +1032,6 @@
 			color: #7c3aed;
 		}
 
-	/* ===== Usuario cell ===== */
 	.uCell {
 		display: flex;
 		align-items: center;
@@ -1040,11 +1050,11 @@
 	}
 
 	.av-purple {
-		background: rgba(124,58,237,.9);
+		background: rgba(124, 58, 237, 0.9);
 	}
 
 	.av-blue {
-		background: rgba(59,130,246,.9);
+		background: rgba(59, 130, 246, 0.9);
 	}
 
 	.uInfo {
@@ -1056,7 +1066,6 @@
 		color: #0f172a;
 	}
 
-	/* ===== Chips ===== */
 	.chip {
 		display: inline-flex;
 		align-items: center;
@@ -1065,7 +1074,7 @@
 		border-radius: 999px;
 		font-weight: 900;
 		font-size: 12px;
-		border: 1px solid rgba(15,23,42,.06);
+		border: 1px solid rgba(15, 23, 42, 0.06);
 	}
 
 		.chip .dot {
@@ -1076,7 +1085,7 @@
 		}
 
 	.chip-admin {
-		background: rgba(124,58,237,.10);
+		background: rgba(124, 58, 237, 0.10);
 		color: #7c3aed;
 	}
 
@@ -1085,7 +1094,7 @@
 		}
 
 	.chip-user {
-		background: rgba(59,130,246,.10);
+		background: rgba(59, 130, 246, 0.10);
 		color: #2563eb;
 	}
 
@@ -1094,7 +1103,7 @@
 		}
 
 	.chip-auditor {
-		background: rgba(249,115,22,.10);
+		background: rgba(249, 115, 22, 0.10);
 		color: #f97316;
 	}
 
@@ -1102,7 +1111,6 @@
 			background: #f97316;
 		}
 
-	/* ===== Estado ===== */
 	.state {
 		display: flex;
 		align-items: center;
@@ -1126,8 +1134,8 @@
 		}
 
 	.miniBtn {
-		border: 1px solid rgba(15,23,42,.10);
-		background: rgba(255,255,255,.9);
+		border: 1px solid rgba(15, 23, 42, 0.10);
+		background: rgba(255, 255, 255, 0.9);
 		border-radius: 10px;
 		padding: 6px 10px;
 		font-weight: 900;
@@ -1135,7 +1143,6 @@
 		color: #334155;
 	}
 
-	/* ===== Footer ===== */
 	.tfoot {
 		display: flex;
 		align-items: center;
@@ -1161,7 +1168,7 @@
 	}
 
 		.foot-right:disabled {
-			opacity: .55;
+			opacity: 0.55;
 			cursor: not-allowed;
 		}
 
@@ -1169,11 +1176,10 @@
 		font-size: 18px;
 	}
 
-	/* ===== Modal ===== */
 	.modalOverlay {
 		position: fixed;
 		inset: 0;
-		background: rgba(15,23,42,.25);
+		background: rgba(15, 23, 42, 0.25);
 		display: grid;
 		place-items: center;
 		padding: 24px;
@@ -1185,8 +1191,8 @@
 		max-width: calc(100vw - 32px);
 		background: #fff;
 		border-radius: 0;
-		box-shadow: 0 18px 40px rgba(0,0,0,.22);
-		border: 1px solid rgba(15,23,42,.10);
+		box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
+		border: 1px solid rgba(15, 23, 42, 0.10);
 		overflow: hidden;
 	}
 
@@ -1196,7 +1202,7 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0 18px;
-		border-bottom: 1px solid rgba(15,23,42,.10);
+		border-bottom: 1px solid rgba(15, 23, 42, 0.10);
 	}
 
 	.modalTitle {
@@ -1226,9 +1232,13 @@
 
 	.grid2 {
 		display: grid;
-		grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 		column-gap: 22px;
 		row-gap: 14px;
+	}
+
+	.span2 {
+		grid-column: 1 / -1;
 	}
 
 	.field label {
@@ -1238,29 +1248,31 @@
 		color: #64748b;
 	}
 
-	.field input, .field select {
+	.field input,
+	.field select {
 		width: 100%;
 		box-sizing: border-box;
-		border: 1px solid rgba(148,163,184,.55);
+		border: 1px solid rgba(148, 163, 184, 0.55);
 		border-radius: 10px;
 		padding: 12px 14px;
 		font-size: 14px;
 		outline: none;
 		background: #fff;
-		transition: border-color .15s ease, box-shadow .15s ease;
+		transition: border-color 0.15s ease, box-shadow 0.15s ease;
 	}
 
-		.field input:focus, .field select:focus {
-			border-color: rgba(59,130,246,.65);
-			box-shadow: 0 0 0 3px rgba(59,130,246,.18);
+		.field input:focus,
+		.field select:focus {
+			border-color: rgba(59, 130, 246, 0.65);
+			box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
 		}
 
 	.hint {
 		margin-top: 8px;
 		font-weight: 800;
 		color: #b91c1c;
-		background: rgba(239,68,68,.08);
-		border: 1px solid rgba(239,68,68,.25);
+		background: rgba(239, 68, 68, 0.08);
+		border: 1px solid rgba(239, 68, 68, 0.25);
 		padding: 8px 10px;
 		border-radius: 10px;
 		font-size: 12px;
@@ -1290,18 +1302,18 @@
 		border-radius: 12px;
 		color: #fff;
 		font-weight: 900;
-		background: linear-gradient(180deg,#2f74ff,#1e5ae9);
-		box-shadow: 0 14px 28px rgba(37,99,235,.25);
+		background: linear-gradient(180deg, #2f74ff, #1e5ae9);
+		box-shadow: 0 14px 28px rgba(37, 99, 235, 0.25);
 	}
 
 		.btnPrimary:disabled {
-			opacity: .7;
+			opacity: 0.7;
 			cursor: not-allowed;
 		}
 
 	.alert {
-		border: 1px solid rgba(239,68,68,.25);
-		background: rgba(239,68,68,.08);
+		border: 1px solid rgba(239, 68, 68, 0.25);
+		background: rgba(239, 68, 68, 0.08);
 		color: #b91c1c;
 		padding: 10px 12px;
 		border-radius: 10px;
@@ -1313,7 +1325,8 @@
 			grid-template-columns: 1fr;
 		}
 
-		.usersHead, .usersRow {
+		.usersHead,
+		.usersRow {
 			grid-template-columns: 1fr;
 		}
 

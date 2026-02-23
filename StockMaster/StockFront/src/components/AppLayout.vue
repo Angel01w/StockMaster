@@ -37,7 +37,7 @@
 			</nav>
 
 			<div class="logout">
-				<button class="logoutBtn">Log out</button>
+				<button class="logoutBtn" @click="logout">Log out</button>
 			</div>
 		</aside>
 
@@ -45,7 +45,6 @@
 			<header class="top">
 				<div class="crumb">
 					<div class="ic">
-						<!-- iconito simple para la sección -->
 						<svg viewBox="0 0 24 24" fill="none" class="icSvg">
 							<path v-if="sectionKey === 'productos'"
 								  d="M4 7h16M7 4h10M6 12h12M9 17h6"
@@ -86,11 +85,18 @@
 
 <script setup>
 	import { computed } from "vue";
-	import { RouterLink, useRoute } from "vue-router";
+	import { RouterLink, useRoute, useRouter } from "vue-router";
 
 	const route = useRoute();
+	const router = useRouter();
 
-	// clave de sección basada en el path (para icon y título)
+	const logout = async () => {
+		localStorage.removeItem("sm_token");
+		sessionStorage.removeItem("sm_token");
+		await router.replace("/login");
+		window.location.reload();
+	};
+
 	const sectionKey = computed(() => {
 		const p = (route.path || "").toLowerCase();
 
@@ -122,7 +128,7 @@
 <style scoped>
 	.shell {
 		min-height: 100vh;
-		background: radial-gradient(900px 500px at 80% 20%, rgba(168,85,247,.22), transparent 60%), radial-gradient(800px 460px at 15% 30%, rgba(59,130,246,.18), transparent 55%), #eef3ff;
+		background: radial-gradient(900px 500px at 80% 20%, rgba(168, 85, 247, 0.22), transparent 60%), radial-gradient(800px 460px at 15% 30%, rgba(59, 130, 246, 0.18), transparent 55%), #eef3ff;
 		display: flex;
 	}
 
@@ -133,7 +139,7 @@
 		display: flex;
 		flex-direction: column;
 		padding: 14px;
-		border-right: 1px solid rgba(255,255,255,.12);
+		border-right: 1px solid rgba(255, 255, 255, 0.12);
 	}
 
 	.brand {
@@ -145,7 +151,7 @@
 	}
 
 	.btext {
-		letter-spacing: .2px;
+		letter-spacing: 0.2px;
 	}
 
 	.menu {
@@ -156,7 +162,7 @@
 	}
 
 	.mi {
-		color: rgba(255,255,255,.86);
+		color: rgba(255, 255, 255, 0.86);
 		text-decoration: none;
 		padding: 10px 12px;
 		border-radius: 10px;
@@ -171,16 +177,16 @@
 			width: 8px;
 			height: 8px;
 			border-radius: 999px;
-			background: rgba(255,255,255,.35);
+			background: rgba(255, 255, 255, 0.35);
 		}
 
 		.mi:hover {
-			background: rgba(255,255,255,.10);
+			background: rgba(255, 255, 255, 0.1);
 		}
 
 		.mi.active {
-			background: rgba(59,130,246,.40);
-			border: 1px solid rgba(255,255,255,.14);
+			background: rgba(59, 130, 246, 0.4);
+			border: 1px solid rgba(255, 255, 255, 0.14);
 		}
 
 			.mi.active .dot {
@@ -196,11 +202,16 @@
 		width: 100%;
 		padding: 10px 12px;
 		border-radius: 10px;
-		border: 1px solid rgba(255,255,255,.14);
-		background: rgba(255,255,255,.08);
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		background: rgba(255, 255, 255, 0.08);
 		color: #fff;
 		font-weight: 900;
+		cursor: pointer;
 	}
+
+		.logoutBtn:hover {
+			background: rgba(255, 255, 255, 0.14);
+		}
 
 	.main {
 		flex: 1;
@@ -210,13 +221,13 @@
 
 	.top {
 		height: 64px;
-		background: rgba(255,255,255,.92);
-		border-bottom: 1px solid rgba(15,23,42,.08);
+		background: rgba(255, 255, 255, 0.92);
+		border-bottom: 1px solid rgba(15, 23, 42, 0.08);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		padding: 0 16px;
-		box-shadow: 0 10px 22px rgba(10, 20, 70, .08);
+		box-shadow: 0 10px 22px rgba(10, 20, 70, 0.08);
 	}
 
 	.crumb {
@@ -229,8 +240,8 @@
 		width: 36px;
 		height: 36px;
 		border-radius: 12px;
-		background: rgba(59,130,246,.12);
-		border: 1px solid rgba(59,130,246,.18);
+		background: rgba(59, 130, 246, 0.12);
+		border: 1px solid rgba(59, 130, 246, 0.18);
 		display: grid;
 		place-items: center;
 		color: #2563eb;
@@ -256,8 +267,8 @@
 		width: 36px;
 		height: 36px;
 		border-radius: 12px;
-		border: 1px solid rgba(15,23,42,.08);
-		background: rgba(15,23,42,.03);
+		border: 1px solid rgba(15, 23, 42, 0.08);
+		background: rgba(15, 23, 42, 0.03);
 		cursor: pointer;
 	}
 
@@ -272,7 +283,7 @@
 		width: 34px;
 		height: 34px;
 		border-radius: 999px;
-		border: 2px solid rgba(59,130,246,.25);
+		border: 2px solid rgba(59, 130, 246, 0.25);
 	}
 
 	.uname {

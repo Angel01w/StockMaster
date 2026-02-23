@@ -7,6 +7,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="StockFront\src\NewFolder1\**" />
+    <Compile Remove="StockFront\src\NewFolder\**" />
+    <Content Remove="StockFront\src\NewFolder1\**" />
+    <Content Remove="StockFront\src\NewFolder\**" />
+    <EmbeddedResource Remove="StockFront\src\NewFolder1\**" />
+    <EmbeddedResource Remove="StockFront\src\NewFolder\**" />
+    <None Remove="StockFront\src\NewFolder1\**" />
+    <None Remove="StockFront\src\NewFolder\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.0" />

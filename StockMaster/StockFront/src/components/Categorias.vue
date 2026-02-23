@@ -66,7 +66,11 @@
 
 					<div class="card-foot">
 						<div class="foot-lbl">Productos</div>
-						<div class="foot-num">{{ productosCount(c) }}</div>
+
+						<!-- ✅ ahora se calcula de verdad desde /api/Productos -->
+						<div class="foot-num">
+							{{ productosCount(c) }}
+						</div>
 					</div>
 				</div>
 			</div>
@@ -99,7 +103,15 @@
 						<button class="btnLink" type="button" @click="closeModal">Cancelar</button>
 
 						<button class="btnPrimary" type="button" :disabled="saving" @click="saveCategory">
-							{{ saving ? (mode === "create" ? "Creando..." : "Guardando...") : (mode === "create" ? "Crear Categoría" : "Guardar Cambios") }}
+							{{
+								saving
+									? mode === "create"
+										? "Creando..."
+										: "Guardando..."
+									: mode === "create"
+									? "Crear Categoría"
+									: "Guardar Cambios"
+							}}
 						</button>
 					</div>
 				</div>
@@ -119,9 +131,13 @@
 	 * - GET    /api/Categorias/{id}
 	 * - PUT    /api/Categorias/{id}
 	 * - DELETE /api/Categorias/{id}
+	 *
+	 * Productos:
+	 * - GET /api/Productos  (para contar por categoría)
 	 */
 	const API_BASE = "https://localhost:7198";
 	const CATEGORIES_ENDPOINT = `${API_BASE}/api/Categorias`;
+	const PRODUCTS_ENDPOINT = `${API_BASE}/api/Productos`;
 
 	const search = ref("");
 	const isOpen = ref(false);
@@ -134,6 +150,11 @@
 
 	const rows = ref([]);
 
+	// ✅ lista de productos para poder contar
+	const productos = ref([]);
+	const productosLoading = ref(false);
+	const productosError = ref("");
+
 	const emptyForm = () => ({
 		idCategoria: null,
 		nombre: "",
@@ -141,35 +162,148 @@
 	});
 	const form = reactive(emptyForm());
 
-	onMounted(loadCategories);
+	onMounted(async () => {
+		await loadAll();
+	});
 
-	async function loadCategories() {
+	/** =======================
+	 * NORMALIZERS
+	 * ======================= */
+	function normalizeList(data) {
+		if (Array.isArray(data)) return data;
+		if (Array.isArray(data?.$values)) return data.$values; // .NET sometimes
+		if (Array.isArray(data?.items)) return data.items;
+		if (Array.isArray(data?.data)) return data.data;
+		if (Array.isArray(data?.result)) return data.result;
+		if (Array.isArray(data?.value)) return data.value;
+		if (Array.isArray(data?.results)) return data.results;
+		return [];
+	}
+
+	function normalizeCategoria(c) {
+		// soporta idCategoria / id / IdCategoria / categoriaId etc.
+		const idCategoria =
+			c?.idCategoria ??
+			c?.IdCategoria ??
+			c?.categoriaId ??
+			c?.CategoriaId ??
+			c?.id ??
+			c?.Id ??
+			null;
+
+		return {
+			...c,
+			idCategoria: idCategoria != null ? Number(idCategoria) : null,
+			nombre: String(c?.nombre ?? c?.Nombre ?? c?.name ?? "").trim(),
+			descripcion: String(c?.descripcion ?? c?.Descripcion ?? "").trim(),
+		};
+	}
+
+	function normalizeProducto(p) {
+		// clave: dónde viene la categoría del producto
+		const idCategoria =
+			p?.idCategoria ??
+			p?.IdCategoria ??
+			p?.categoriaId ??
+			p?.CategoriaId ??
+			p?.idCategoriaFk ??
+			p?.IdCategoriaFk ??
+			// o a veces viene anidada: { categoria: { idCategoria: 1 } }
+			p?.categoria?.idCategoria ??
+			p?.categoria?.IdCategoria ??
+			p?.Categoria?.idCategoria ??
+			p?.Categoria?.IdCategoria ??
+			null;
+
+		return {
+			...p,
+			idCategoria: idCategoria != null ? Number(idCategoria) : null,
+		};
+	}
+
+	/** =======================
+	 * LOADERS
+	 * ======================= */
+	async function loadAll() {
 		loading.value = true;
 		apiError.value = "";
 		try {
-			const res = await fetch(CATEGORIES_ENDPOINT);
-			if (!res.ok) throw new Error(`GET /api/Categorias falló (${res.status})`);
-			const data = await res.json();
-			const list = Array.isArray(data) ? data : (data?.items ?? []);
-			rows.value = list;
+			// cargamos ambos en paralelo: categorias + productos
+			await Promise.all([loadCategories(), loadProductos()]);
 		} catch (e) {
-			rows.value = [];
-			apiError.value = e?.message ?? "No se pudo cargar categorías desde la API.";
+			apiError.value = e?.message ?? "Error cargando datos desde la API.";
 		} finally {
 			loading.value = false;
 		}
 	}
 
+	async function loadCategories() {
+		try {
+			const res = await fetch(CATEGORIES_ENDPOINT);
+			if (!res.ok) throw new Error(`GET /api/Categorias falló (${res.status})`);
+			const data = await res.json();
+			const list = normalizeList(data);
+
+			rows.value = list.map(normalizeCategoria);
+		} catch (e) {
+			rows.value = [];
+			throw e;
+		}
+	}
+
+	async function loadProductos() {
+		productosLoading.value = true;
+		productosError.value = "";
+		try {
+			const res = await fetch(PRODUCTS_ENDPOINT);
+			if (!res.ok) throw new Error(`GET /api/Productos falló (${res.status})`);
+			const data = await res.json();
+			const list = normalizeList(data);
+
+			productos.value = list.map(normalizeProducto);
+		} catch (e) {
+			productos.value = [];
+			// no rompas toda la pantalla si productos falla: muestra error y cuenta = 0
+			productosError.value = e?.message ?? "No se pudieron cargar productos.";
+		} finally {
+			productosLoading.value = false;
+		}
+	}
+
+	/** =======================
+	 * HELPERS
+	 * ======================= */
 	function rowKey(c) {
 		return String(c?.idCategoria ?? c?.nombre ?? Math.random());
 	}
 
+	// ✅ Mapa { idCategoria -> cantidad }
+	const productosCountMap = computed(() => {
+		const map = new Map();
+		for (const p of productos.value) {
+			const idCat = p?.idCategoria;
+			if (idCat == null) continue;
+			map.set(idCat, (map.get(idCat) ?? 0) + 1);
+		}
+		return map;
+	});
+
+	/**
+	 * ✅ Ahora el contador es real.
+	 * - Si el API ya trae productosCount/totalProductos, lo usa.
+	 * - Si no, calcula por /api/Productos.
+	 */
 	function productosCount(c) {
 		if (typeof c?.productosCount === "number") return c.productosCount;
 		if (typeof c?.totalProductos === "number") return c.totalProductos;
+
+		// por si el backend manda array anidado
 		if (Array.isArray(c?.productos)) return c.productos.length;
-		if (typeof c?.productos === "number") return c.productos;
-		return 0;
+
+		const id = c?.idCategoria != null ? Number(c.idCategoria) : null;
+		if (!id) return 0;
+
+		return productosCountMap.value.get(id) ?? 0;
 	}
 
 	const filteredRows = computed(() => {
@@ -184,6 +318,9 @@
 		});
 	});
 
+	/** =======================
+	 * UI ACTIONS
+	 * ======================= */
 	function openCreate() {
 		apiError.value = "";
 		mode.value = "create";
@@ -224,8 +361,13 @@
 	async function readApiError(res) {
 		let msg = `Error (${res.status}).`;
 		try {
-			const data = await res.json();
-			msg = data.message || data.msg || data.error || JSON.stringify(data);
+			const ct = res.headers.get("content-type") || "";
+			if (ct.includes("application/json")) {
+				const data = await res.json();
+				msg = data.message || data.msg || data.error || data.title || JSON.stringify(data);
+			} else {
+				msg = await res.text();
+			}
 		} catch { }
 		return new Error(msg);
 	}
@@ -254,14 +396,17 @@
 				});
 				if (!res.ok) throw await readApiError(res);
 
-				// si POST no devuelve objeto, recargamos
 				let created = null;
-				try { created = await res.json(); } catch { created = null; }
+				try {
+					created = await res.json();
+				} catch {
+					created = null;
+				}
 
-				if (!created || !created.idCategoria) {
+				if (!created || !(created.idCategoria || created.IdCategoria || created.id || created.Id)) {
 					await loadCategories();
 				} else {
-					rows.value.unshift(created);
+					rows.value.unshift(normalizeCategoria(created));
 				}
 
 				closeModal();
@@ -282,7 +427,6 @@
 			});
 			if (!res.ok) throw await readApiError(res);
 
-			// si PUT devuelve 204, recargamos
 			if (res.status === 204) {
 				await loadCategories();
 				closeModal();
@@ -290,10 +434,14 @@
 			}
 
 			let updated = null;
-			try { updated = await res.json(); } catch { updated = { ...payload, idCategoria: editingIdCategoria.value }; }
+			try {
+				updated = await res.json();
+			} catch {
+				updated = { ...payload, idCategoria: editingIdCategoria.value };
+			}
 
 			const idx = rows.value.findIndex((r) => Number(r?.idCategoria) === Number(editingIdCategoria.value));
-			if (idx !== -1) rows.value[idx] = { ...rows.value[idx], ...updated, ...payload };
+			if (idx !== -1) rows.value[idx] = { ...rows.value[idx], ...normalizeCategoria(updated), ...payload };
 
 			closeModal();
 		} catch (e) {
@@ -320,6 +468,9 @@
 			if (!res.ok) throw await readApiError(res);
 
 			rows.value = rows.value.filter((r) => Number(r?.idCategoria) !== Number(id));
+
+			// ✅ opcional: recargar productos (por si backend también eliminó productos o cambió relaciones)
+			// await loadProductos();
 		} catch (e) {
 			alert(e?.message ?? "No se pudo eliminar.");
 		}
@@ -538,7 +689,7 @@
 	.drawerOverlay {
 		position: fixed;
 		inset: 0;
-		background: rgba(15,23,42,.12);
+		background: rgba(15, 23, 42, 0.12);
 		z-index: 3000;
 		display: flex;
 		justify-content: flex-end;
@@ -549,8 +700,8 @@
 		max-width: 88vw;
 		height: 100vh;
 		background: #fff;
-		border-left: 1px solid rgba(15,23,42,.10);
-		box-shadow: -18px 0 40px rgba(0,0,0,.08);
+		border-left: 1px solid rgba(15, 23, 42, 0.10);
+		box-shadow: -18px 0 40px rgba(0, 0, 0, 0.08);
 		display: flex;
 		flex-direction: column;
 	}
@@ -561,7 +712,7 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0 18px;
-		border-bottom: 1px solid rgba(15,23,42,.10);
+		border-bottom: 1px solid rgba(15, 23, 42, 0.10);
 	}
 
 	.drawerTitle {
@@ -597,16 +748,17 @@
 		font-size: 14px;
 	}
 
-	.field input, .field textarea {
+	.field input,
+	.field textarea {
 		width: 100%;
 		box-sizing: border-box;
-		border: 1px solid rgba(148,163,184,.55);
+		border: 1px solid rgba(148, 163, 184, 0.55);
 		border-radius: 12px;
 		padding: 12px 14px;
 		font-size: 14px;
 		outline: none;
 		background: #fff;
-		transition: border-color .15s ease, box-shadow .15s ease;
+		transition: border-color 0.15s ease, box-shadow 0.15s ease;
 	}
 
 	.field textarea {
@@ -614,9 +766,10 @@
 		min-height: 220px;
 	}
 
-		.field input:focus, .field textarea:focus {
-			border-color: rgba(59,130,246,.65);
-			box-shadow: 0 0 0 3px rgba(59,130,246,.18);
+		.field input:focus,
+		.field textarea:focus {
+			border-color: rgba(59, 130, 246, 0.65);
+			box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
 		}
 
 	.drawerFoot {
@@ -626,7 +779,7 @@
 		align-items: center;
 		justify-content: flex-end;
 		gap: 18px;
-		border-top: 1px solid rgba(15,23,42,.10);
+		border-top: 1px solid rgba(15, 23, 42, 0.10);
 	}
 
 	.btnLink {
@@ -646,13 +799,13 @@
 		border-radius: 14px;
 		color: #fff;
 		font-weight: 900;
-		background: linear-gradient(180deg,#2f74ff,#1e5ae9);
-		box-shadow: 0 14px 28px rgba(37,99,235,.25);
+		background: linear-gradient(180deg, #2f74ff, #1e5ae9);
+		box-shadow: 0 14px 28px rgba(37, 99, 235, 0.25);
 		font-size: 15px;
 	}
 
 		.btnPrimary:disabled {
-			opacity: .7;
+			opacity: 0.7;
 			cursor: not-allowed;
 		}
 
