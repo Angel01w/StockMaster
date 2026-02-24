@@ -45,10 +45,6 @@
 						</button>
 					</div>
 
-					<div class="row">
-						<a class="link" href="#" @click.prevent="onForgot">¿Olvidaste tu contraseña?</a>
-					</div>
-
 					<button class="btn" type="submit" :disabled="loading">
 						{{ loading ? "Ingresando..." : "Ingresar" }}
 					</button>
@@ -218,6 +214,7 @@
 	.btn {
 		width: 100%;
 		height: 46px;
+		margin-top: 14px;
 		border: none;
 		border-radius: 10px;
 		background: linear-gradient(90deg, #2f6bff, #2a55ff);

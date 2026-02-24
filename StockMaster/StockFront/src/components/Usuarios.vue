@@ -6,14 +6,13 @@
 					<div class="cube">
 						<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
 							<path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0Z" stroke="currentColor" stroke-width="1.8" />
-							<path d="M4 20c.7-3.4 4-5 8-5s7.3 1.6 8 5" stroke="currentColor" stroke-width="1.8"
-								  stroke-linecap="round" />
+							<path d="M4 20c.7-3.4 4-5 8-5s7.3 1.6 8 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
 						</svg>
 					</div>
 					<div class="h1">Gestión de Usuarios</div>
 				</div>
 
-				<button v-if="isAdmin" class="btn-primary" type="button" @click="openCreate">
+				<button class="btn-primary" type="button" @click="openCreate">
 					<span class="plus">＋</span>
 					Nuevo Usuario
 				</button>
@@ -85,21 +84,17 @@
 							<span class="sDot" :class="isActive(u) ? 'on' : 'off'"></span>
 							<span class="muted2">{{ isActive(u) ? "Activo" : "Inactivo" }}</span>
 
-							<button v-if="isAdmin" class="miniBtn" type="button" @click="toggleEstado(u)">
+							<button class="miniBtn" type="button" @click="toggleEstado(u)" :disabled="rowBusyId === (u?.idUsuario ?? null)">
 								{{ isActive(u) ? "Desactivar" : "Activar" }}
 							</button>
 						</div>
 
 						<div class="muted">{{ lastAccess(u) }}</div>
 
-						<div class="actions" v-if="isAdmin">
+						<div class="actions">
 							<button class="icon-btn edit" type="button" title="Editar" aria-label="Editar" @click="openEdit(u)">✎</button>
 							<button class="icon-btn key" type="button" title="Cambiar password" aria-label="Cambiar password" @click="openPassword(u)">🔑</button>
 							<button class="icon-btn del" type="button" title="Eliminar" aria-label="Eliminar" @click="removeUser(u)">🗑</button>
-						</div>
-
-						<div class="actions" v-else>
-							<span class="muted">-</span>
 						</div>
 					</div>
 
@@ -113,7 +108,7 @@
 				</div>
 			</div>
 
-			<div v-if="isOpen && isAdmin" class="modalOverlay" @click.self="closeModal">
+			<div v-if="isOpen" class="modalOverlay" @click.self="closeModal">
 				<div class="modal" role="dialog" aria-modal="true">
 					<div class="modalHead">
 						<div class="modalTitle">{{ mode === "create" ? "Nuevo Usuario" : "Editar Usuario" }}</div>
@@ -149,7 +144,7 @@
 								</select>
 
 								<div v-if="!rolesLoading && rolesLoadedOnce && roles.length === 0" class="hint">
-									No hay roles registrados en la base de datos (api/Roles devolvió vacío).
+									No hay roles registrados en la base de datos.
 								</div>
 							</div>
 
@@ -184,7 +179,7 @@
 				</div>
 			</div>
 
-			<div v-if="isPwdOpen && isAdmin" class="modalOverlay" @click.self="closePwd">
+			<div v-if="isPwdOpen" class="modalOverlay" @click.self="closePwd">
 				<div class="modal" role="dialog" aria-modal="true">
 					<div class="modalHead">
 						<div class="modalTitle">Cambiar Password</div>
@@ -219,6 +214,7 @@
 					</div>
 				</div>
 			</div>
+
 		</div>
 	</div>
 </template>
@@ -226,14 +222,10 @@
 <script setup>
 	import { computed, onMounted, reactive, ref } from "vue";
 
-	const rawUser = localStorage.getItem("sm_user");
-	const sessionUser = rawUser ? JSON.parse(rawUser) : null;
-	const sessionRole = (sessionUser?.rol || "").toLowerCase();
-	const isAdmin = sessionRole === "admin";
-
 	const API_BASE = "https://localhost:7198";
 	const USERS_ENDPOINT = `${API_BASE}/api/Usuarios`;
 	const ROLES_ENDPOINT = `${API_BASE}/api/Roles`;
+	const RESET_PASSWORD_ENDPOINT = `${API_BASE}/api/Auth/reset-password`;
 
 	const search = ref("");
 	const isOpen = ref(false);
@@ -260,7 +252,10 @@
 	const pwdError = ref("");
 	const pwdUserId = ref(null);
 	const pwdUserLabel = ref("");
+	const pwdUsername = ref("");
 	const pwdForm = reactive({ password: "", password2: "" });
+
+	const rowBusyId = ref(null);
 
 	const emptyForm = () => ({
 		idUsuario: null,
@@ -276,6 +271,69 @@
 	onMounted(async () => {
 		await loadAll();
 	});
+
+	function getToken() {
+		return localStorage.getItem("sm_token") || sessionStorage.getItem("sm_token") || "";
+	}
+
+	function extractFirstValidationMessage(obj) {
+		const errors = obj?.errors;
+		if (!errors || typeof errors !== "object") return "";
+		for (const k of Object.keys(errors)) {
+			const v = errors[k];
+			if (Array.isArray(v) && v.length) return String(v[0]);
+			if (typeof v === "string" && v.trim()) return v.trim();
+		}
+		return "";
+	}
+
+	async function readApiError(res) {
+		let data = null;
+		let text = "";
+		try {
+			const ct = res.headers.get("content-type") || "";
+			if (ct.includes("application/json")) {
+				data = await res.json();
+				const first = extractFirstValidationMessage(data);
+				text =
+					first ||
+					data?.message ||
+					data?.msg ||
+					data?.error ||
+					data?.title ||
+					(data?.errors ? JSON.stringify(data.errors) : "") ||
+					JSON.stringify(data);
+			} else {
+				text = await res.text();
+			}
+		} catch { }
+
+		const msg = text?.trim()
+			? `${res.status} ${res.statusText}: ${text}`
+			: `${res.status} ${res.statusText}`;
+
+		return new Error(msg);
+	}
+
+	async function apiFetch(url, options = {}) {
+		const token = getToken();
+		const headers = new Headers(options.headers || {});
+		if (!headers.has("Content-Type") && options.body != null) headers.set("Content-Type", "application/json");
+		if (token) headers.set("Authorization", `Bearer ${token}`);
+
+		const res = await fetch(url, { ...options, headers });
+		if (!res.ok) throw await readApiError(res);
+
+		const ct = res.headers.get("content-type") || "";
+		if (ct.includes("application/json")) {
+			try {
+				return await res.json();
+			} catch {
+				return null;
+			}
+		}
+		return null;
+	}
 
 	function normalizeRole(r) {
 		const idRol =
@@ -338,6 +396,9 @@
 			u?.rolNombre ??
 			null;
 
+		const username =
+			u?.username ?? u?.userName ?? u?.Usuario ?? u?.usuario ?? null;
+
 		return {
 			...u,
 			idUsuario,
@@ -348,6 +409,7 @@
 			activo: activoBool,
 			estado: activoBool ? "Activo" : "Inactivo",
 			ultimoAcceso,
+			username,
 		};
 	}
 
@@ -356,32 +418,8 @@
 		if (Array.isArray(data?.items)) return data.items;
 		if (Array.isArray(data?.data)) return data.data;
 		if (Array.isArray(data?.result)) return data.result;
+		if (Array.isArray(data?.$values)) return data.$values;
 		return [];
-	}
-
-	async function readApiError(res) {
-		let text = "";
-		try {
-			const ct = res.headers.get("content-type") || "";
-			if (ct.includes("application/json")) {
-				const data = await res.json();
-				text =
-					data?.message ||
-					data?.msg ||
-					data?.error ||
-					data?.title ||
-					(data?.errors ? JSON.stringify(data.errors) : "") ||
-					JSON.stringify(data);
-			} else {
-				text = await res.text();
-			}
-		} catch { }
-
-		const msg = text?.trim()
-			? `${res.status} ${res.statusText}: ${text}`
-			: `${res.status} ${res.statusText}`;
-
-		return new Error(msg);
 	}
 
 	async function loadAll() {
@@ -399,24 +437,17 @@
 	async function loadRoles() {
 		rolesLoading.value = true;
 		rolesLoadedOnce.value = true;
-
-		const res = await fetch(ROLES_ENDPOINT);
-		if (!res.ok) {
+		try {
+			const data = await apiFetch(ROLES_ENDPOINT, { method: "GET" });
+			const list = normalizeList(data).map(normalizeRole);
+			roles.value = list.filter((x) => x.idRol != null);
+		} finally {
 			rolesLoading.value = false;
-			throw await readApiError(res);
 		}
-
-		const data = await res.json();
-		const list = normalizeList(data).map(normalizeRole);
-
-		roles.value = list.filter((x) => x.idRol != null);
-		rolesLoading.value = false;
 	}
 
 	async function loadUsers() {
-		const res = await fetch(USERS_ENDPOINT);
-		if (!res.ok) throw await readApiError(res);
-		const data = await res.json();
+		const data = await apiFetch(USERS_ENDPOINT, { method: "GET" });
 		rows.value = normalizeList(data).map(normalizeUser);
 	}
 
@@ -495,8 +526,6 @@
 	);
 
 	function openCreate() {
-		if (!isAdmin) return;
-
 		apiError.value = "";
 		mode.value = "create";
 		editingId.value = null;
@@ -509,15 +538,10 @@
 	}
 
 	function openEdit(u) {
-		if (!isAdmin) return;
-
 		apiError.value = "";
 		mode.value = "edit";
 
 		const id = u?.idUsuario ?? null;
-		if (!id) {
-			apiError.value = "Este registro no tiene idUsuario. La API debe devolverlo para editar/eliminar.";
-		}
 		editingId.value = id;
 
 		Object.assign(form, emptyForm(), {
@@ -575,12 +599,56 @@
 			rolNombre: r?.nombre ?? null,
 			activo: form.estado === "Activo",
 			estado: form.estado,
+			username: deriveUsernameFromEmail(form.correo),
 		});
 	}
 
-	async function saveUser() {
-		if (!isAdmin) return;
+	function buildFullUpdatePayloadFromRow(u, overrides = {}) {
+		const email = (u?.correo ?? u?.email ?? "").toString().trim();
+		const nombreCompleto = (u?.nombreCompleto ?? u?.fullName ?? u?.nombre ?? displayName(u) ?? "").toString().trim();
+		const username = (u?.username ?? u?.userName ?? "").toString().trim() || deriveUsernameFromEmail(email);
 
+		const idRol =
+			u?.idRol ??
+			u?.idRole ??
+			u?.rolId ??
+			u?.roleId ??
+			roles.value?.[0]?.idRol ??
+			null;
+
+		const activo =
+			overrides.activo != null
+				? Boolean(overrides.activo)
+				: Boolean(u?.activo ?? (String(u?.estado ?? "").toLowerCase() === "activo"));
+
+		const estado = overrides.estado != null ? String(overrides.estado) : (activo ? "Activo" : "Inactivo");
+
+		const payload = {
+			nombreCompleto,
+			NombreCompleto: nombreCompleto,
+			fullName: nombreCompleto,
+			nombre: nombreCompleto,
+
+			email,
+			Email: email,
+			correo: email,
+
+			username,
+			Username: username,
+
+			idRol: idRol != null ? Number(idRol) : null,
+			idRole: idRol != null ? Number(idRol) : null,
+
+			activo,
+			estado,
+		};
+
+		for (const k of Object.keys(overrides)) payload[k] = overrides[k];
+
+		return payload;
+	}
+
+	async function saveUser() {
 		apiError.value = "";
 		const err = validate();
 		if (err) {
@@ -594,13 +662,20 @@
 
 			const payload = {
 				nombreCompleto: form.nombreCompleto,
+				NombreCompleto: form.nombreCompleto,
 				fullName: form.nombreCompleto,
 				nombre: form.nombreCompleto,
+
 				email: form.correo,
+				Email: form.correo,
 				correo: form.correo,
+
 				username,
+				Username: username,
+
 				idRole: Number(form.idRol),
 				idRol: Number(form.idRol),
+
 				estado: form.estado,
 				activo: form.estado === "Activo",
 			};
@@ -608,20 +683,13 @@
 			if (mode.value === "create") {
 				payload.password = form.contrasena;
 				payload.contrasena = form.contrasena;
+			}
 
-				const res = await fetch(USERS_ENDPOINT, {
+			if (mode.value === "create") {
+				const createdRaw = await apiFetch(USERS_ENDPOINT, {
 					method: "POST",
-					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify(payload),
 				});
-				if (!res.ok) throw await readApiError(res);
-
-				let createdRaw = null;
-				try {
-					createdRaw = await res.json();
-				} catch {
-					createdRaw = null;
-				}
 
 				rows.value.unshift(buildOptimisticUser(createdRaw));
 				closeModal();
@@ -634,19 +702,10 @@
 				return;
 			}
 
-			const res = await fetch(`${USERS_ENDPOINT}/${encodeURIComponent(editingId.value)}`, {
+			const updated = await apiFetch(`${USERS_ENDPOINT}/${encodeURIComponent(editingId.value)}`, {
 				method: "PUT",
-				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload),
 			});
-			if (!res.ok) throw await readApiError(res);
-
-			let updated = null;
-			try {
-				updated = await res.json();
-			} catch {
-				updated = null;
-			}
 
 			if (updated) {
 				const n = normalizeUser(updated);
@@ -665,8 +724,6 @@
 	}
 
 	async function removeUser(u) {
-		if (!isAdmin) return;
-
 		const id = u?.idUsuario ?? null;
 		const name = displayName(u);
 
@@ -679,8 +736,7 @@
 		if (!ok) return;
 
 		try {
-			const res = await fetch(`${USERS_ENDPOINT}/${encodeURIComponent(id)}`, { method: "DELETE" });
-			if (!res.ok) throw await readApiError(res);
+			await apiFetch(`${USERS_ENDPOINT}/${encodeURIComponent(id)}`, { method: "DELETE" });
 			rows.value = rows.value.filter((x) => Number(x?.idUsuario) !== Number(id));
 		} catch (e) {
 			alert(e?.message ?? "No se pudo eliminar.");
@@ -688,44 +744,43 @@
 	}
 
 	async function toggleEstado(u) {
-		if (!isAdmin) return;
-
 		const id = u?.idUsuario ?? null;
 		if (!id) return;
 
-		const newState = !isActive(u);
+		const email = (u?.correo ?? u?.email ?? "").toString().trim();
+		const nombreCompleto = (u?.nombreCompleto ?? u?.fullName ?? u?.nombre ?? displayName(u) ?? "").toString().trim();
+
+		if (!email || !nombreCompleto) {
+			alert("No puedo activar/desactivar porque a este usuario le faltan datos requeridos (email/nombreCompleto) en la respuesta de la API.");
+			return;
+		}
+
+		const newActive = !isActive(u);
+		const payload = buildFullUpdatePayloadFromRow(u, { activo: newActive, estado: newActive ? "Activo" : "Inactivo" });
+
+		rowBusyId.value = id;
+
+		const idx = rows.value.findIndex((x) => Number(x?.idUsuario) === Number(id));
+		const prev = idx !== -1 ? { ...rows.value[idx] } : null;
+
+		if (idx !== -1) rows.value[idx] = { ...rows.value[idx], activo: newActive, estado: newActive ? "Activo" : "Inactivo" };
 
 		try {
-			const res = await fetch(`${USERS_ENDPOINT}/${encodeURIComponent(id)}/estado`, {
-				method: "PATCH",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ activo: newState, estado: newState ? "Activo" : "Inactivo" }),
+			const updated = await apiFetch(`${USERS_ENDPOINT}/${encodeURIComponent(id)}`, {
+				method: "PUT",
+				body: JSON.stringify(payload),
 			});
-			if (!res.ok) throw await readApiError(res);
 
-			let updated = null;
-			try {
-				updated = await res.json();
-			} catch {
-				updated = null;
-			}
-
-			if (updated) {
-				const n = normalizeUser(updated);
-				const idx = rows.value.findIndex((x) => Number(x?.idUsuario) === Number(id));
-				if (idx !== -1) rows.value[idx] = { ...rows.value[idx], ...n };
-			} else {
-				const idx = rows.value.findIndex((x) => Number(x?.idUsuario) === Number(id));
-				if (idx !== -1) rows.value[idx] = { ...rows.value[idx], activo: newState, estado: newState ? "Activo" : "Inactivo" };
-			}
+			if (updated && idx !== -1) rows.value[idx] = { ...rows.value[idx], ...normalizeUser(updated) };
 		} catch (e) {
+			if (idx !== -1 && prev) rows.value[idx] = prev;
 			alert(e?.message ?? "No se pudo cambiar el estado.");
+		} finally {
+			rowBusyId.value = null;
 		}
 	}
 
 	function openPassword(u) {
-		if (!isAdmin) return;
-
 		pwdError.value = "";
 		pwdSaving.value = false;
 
@@ -735,8 +790,12 @@
 			return;
 		}
 
+		const email = (u?.correo ?? u?.email ?? "").toString().trim();
+		const username = (u?.username ?? u?.userName ?? "").toString().trim() || deriveUsernameFromEmail(email);
+
 		pwdUserId.value = id;
-		pwdUserLabel.value = `${displayName(u)} (${(u?.correo ?? u?.email) ?? "-"})`;
+		pwdUsername.value = username;
+		pwdUserLabel.value = `${displayName(u)} (${email || "-"})`;
 		pwdForm.password = "";
 		pwdForm.password2 = "";
 		isPwdOpen.value = true;
@@ -750,12 +809,11 @@
 		if (!pwdForm.password) return "La contraseña es obligatoria.";
 		if (pwdForm.password.length < 6) return "Debe tener al menos 6 caracteres.";
 		if (pwdForm.password !== pwdForm.password2) return "Las contraseñas no coinciden.";
+		if (!pwdUsername.value) return "No se encontró username para este usuario.";
 		return "";
 	}
 
 	async function savePassword() {
-		if (!isAdmin) return;
-
 		pwdError.value = "";
 		const err = validatePwd();
 		if (err) {
@@ -763,22 +821,19 @@
 			return;
 		}
 
-		const id = pwdUserId.value;
-		if (!id) {
-			pwdError.value = "No hay usuario seleccionado.";
-			return;
-		}
-
 		pwdSaving.value = true;
 		try {
-			const res = await fetch(`${USERS_ENDPOINT}/${encodeURIComponent(id)}/password`, {
-				method: "PATCH",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ password: pwdForm.password, contrasena: pwdForm.password }),
+			await apiFetch(RESET_PASSWORD_ENDPOINT, {
+				method: "POST",
+				body: JSON.stringify({
+					username: pwdUsername.value,
+					newPassword: pwdForm.password,
+				}),
 			});
-			if (!res.ok) throw await readApiError(res);
 
 			isPwdOpen.value = false;
+			pwdForm.password = "";
+			pwdForm.password2 = "";
 		} catch (e) {
 			pwdError.value = e?.message ?? "No se pudo cambiar el password.";
 		} finally {

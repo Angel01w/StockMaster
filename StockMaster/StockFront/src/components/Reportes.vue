@@ -1,7 +1,6 @@
 ﻿<template>
 	<div class="page">
 		<div class="content">
-			<!-- Header -->
 			<div class="hdr">
 				<div class="hdr-left">
 					<div class="cube" aria-hidden="true">
@@ -13,15 +12,11 @@
 					</div>
 					<div class="h1">Reportes y Consultas</div>
 				</div>
-
-				<!-- (iconos del layout suelen venir del AppLayout; aquí no se repiten) -->
 			</div>
 
-			<!-- Card: Generar Reporte -->
 			<div class="card big">
 				<div class="card-title">Generar Reporte</div>
 
-				<!-- ✅ GRID + FILA FECHAS CON GAP REAL -->
 				<div class="gen-grid">
 					<div class="field">
 						<label>Tipo de Reporte</label>
@@ -35,7 +30,6 @@
 						</div>
 					</div>
 
-					<!-- las fechas en una fila aparte con separación garantizada -->
 					<div class="datesRow">
 						<div class="field">
 							<label>Fecha Desde</label>
@@ -53,13 +47,16 @@
 					</div>
 				</div>
 
+				<div class="hint" v-if="form.tipo === 'movimientos-mes'">
+					Este reporte se genera del mes actual. Las fechas son opcionales (se ignoran).
+				</div>
+
 				<button class="btnGen" type="button" :disabled="generating" @click="generateAndDownload">
 					<span class="btnIco" aria-hidden="true">＋</span>
 					{{ generating ? "Generando..." : "Generar y Descargar Reporte" }}
 				</button>
 			</div>
 
-			<!-- Cards pequeños -->
 			<div class="grid3">
 				<div class="card mini">
 					<div class="mini-ico blue">📄</div>
@@ -83,7 +80,6 @@
 				</div>
 			</div>
 
-			<!-- Reportes recientes -->
 			<div class="card recent">
 				<div class="card-title">Reportes Recientes</div>
 
@@ -94,14 +90,13 @@
 							<div class="recent-name">{{ r.nombre }}</div>
 							<div class="recent-date">{{ r.fecha }}</div>
 						</div>
-						<button class="dl" type="button" title="Descargar" aria-label="Descargar" @click="downloadFromUrl(r.url, r.fileName)">
+						<button class="dl" type="button" title="Descargar" aria-label="Descargar" @click="downloadFromUrl(r.url, r.fileName, r.tipo, r.desde, r.hasta)">
 							⬇
 						</button>
 					</div>
 				</div>
 			</div>
 
-			<!-- toast simple -->
 			<div v-if="toast.msg" class="toast" :class="toast.kind">{{ toast.msg }}</div>
 		</div>
 	</div>
@@ -111,15 +106,22 @@
 	import { reactive, ref } from "vue";
 
 	const API_BASE = "https://localhost:7198";
+	const PRODUCTOS_ENDPOINT = `${API_BASE}/api/Productos`;
+	const MOVS_ENDPOINT = `${API_BASE}/api/Movimientos`;
 
-	/**
-	 * Ajusta esto a TU API real:
-	 * - Ideal: un endpoint que devuelva PDF como file/stream:
-	 *   GET /api/Reportes/pdf?tipo=stock-actual&desde=2026-02-01&hasta=2026-02-19
-	 *
-	 * Si todavía no existe, el front hace fallback a un PDF “demo” generado en el navegador.
-	 */
-	const REPORTS_PDF_ENDPOINT = `${API_BASE}/api/Reportes/pdf`;
+	const USUARIOS_ENDPOINTS = [
+		`${API_BASE}/api/Usuarios`,
+		`${API_BASE}/api/Usuario`,
+		`${API_BASE}/api/Users`,
+		`${API_BASE}/api/UsuariosSistema`,
+	];
+
+	const MOTIVOS_ENDPOINTS = [
+		`${API_BASE}/api/Motivos`,
+		`${API_BASE}/api/Motivo`,
+		`${API_BASE}/api/MotivosMovimiento`,
+		`${API_BASE}/api/MotivoMovimiento`,
+	];
 
 	const generating = ref(false);
 
@@ -139,29 +141,160 @@
 		toastTimer = setTimeout(() => (toast.msg = ""), 2600);
 	}
 
-	const recentReports = ref([
-		{
-			id: 1,
-			nombre: "Reporte Stock Abril 2024",
-			fecha: "25/04/2024 - 12:00 PM",
-			url: "", // si tienes url real, ponla aquí
-			fileName: "Reporte_Stock_Abril_2024.pdf",
-		},
-		{
-			id: 2,
-			nombre: "Movimientos Q1 2024",
-			fecha: "01/01/2024 - 1:30 PM",
-			url: "",
-			fileName: "Movimientos_Q1_2024.pdf",
-		},
-		{
-			id: 3,
-			nombre: "Productos Stock Crítico",
-			fecha: "15/04/2024 - 10:30 AM",
-			url: "",
-			fileName: "Productos_Stock_Critico.pdf",
-		},
-	]);
+	const recentReports = ref([]);
+
+	function normalizeList(data) {
+		if (Array.isArray(data)) return data;
+		if (Array.isArray(data?.$values)) return data.$values;
+		if (Array.isArray(data?.items)) return data.items;
+		if (Array.isArray(data?.data)) return data.data;
+		if (Array.isArray(data?.result)) return data.result;
+		if (Array.isArray(data?.value)) return data.value;
+		if (Array.isArray(data?.results)) return data.results;
+		return [];
+	}
+
+	function toNumber(v, d = 0) {
+		const n = Number(v);
+		return Number.isFinite(n) ? n : d;
+	}
+
+	async function fetchJson(url, opts = {}) {
+		const res = await fetch(url, opts);
+		if (!res.ok) {
+			let msg = `${res.status} ${res.statusText}`;
+			try {
+				const ct = res.headers.get("content-type") || "";
+				if (ct.includes("application/json")) {
+					const j = await res.json();
+					msg = j?.message || j?.error || j?.title || msg;
+				} else {
+					const t = await res.text();
+					if (t?.trim()) msg = `${msg}: ${t}`;
+				}
+			} catch { }
+			throw new Error(`${msg} [${url}]`);
+		}
+		const ct = res.headers.get("content-type") || "";
+		if (ct.includes("application/json")) return await res.json();
+		const text = await res.text();
+		return text ? JSON.parse(text) : null;
+	}
+
+	async function fetchFirstList(endpoints) {
+		let lastErr = null;
+		for (const url of endpoints) {
+			try {
+				const data = await fetchJson(url);
+				return { url, list: normalizeList(data) };
+			} catch (e) {
+				lastErr = e;
+			}
+		}
+		return { url: endpoints[0], list: [], error: lastErr?.message || "No se pudo cargar lista." };
+	}
+
+	function extractCategoriaNombre(raw) {
+		const c = raw?.categoria ?? raw?.Categoria ?? raw?.category ?? raw?.categoriaDto ?? null;
+		if (c && typeof c === "object") {
+			const name = c?.nombre ?? c?.name ?? c?.descripcion ?? c?.description ?? "";
+			return String(name || "—").trim();
+		}
+		const asStr = raw?.categoriaNombre || raw?.categoryName || c;
+		if (asStr && String(asStr).trim()) return String(asStr).trim();
+		const id = raw?.idCategoria ?? raw?.categoriaId ?? raw?.IdCategoria ?? null;
+		return id ? `ID ${id}` : "—";
+	}
+
+	function normalizeProducto(p, idx) {
+		const id = p?.idProducto ?? p?.IdProducto ?? p?.id ?? p?.Id ?? p?.productoId ?? idx;
+		const nombre = p?.nombre ?? p?.Nombre ?? p?.descripcion ?? p?.Descripcion ?? p?.name ?? "";
+		const stock = toNumber(p?.stockActual ?? p?.StockActual ?? p?.stock ?? p?.existencia ?? p?.cantidad ?? p?.qty, 0);
+		const minimo = toNumber(p?.stockMinimo ?? p?.StockMinimo ?? p?.minimo ?? p?.minStock ?? p?.reorderLevel, 0);
+		const categoriaNombre = extractCategoriaNombre(p);
+		return { id: Number(id), nombre: String(nombre ?? "").trim(), categoriaNombre, stock, minimo, _raw: p };
+	}
+
+	function normalizeUsuario(u, idx) {
+		const id = u?.idUsuario ?? u?.IdUsuario ?? u?.id ?? u?.Id ?? idx;
+		const nombreCompleto =
+			u?.nombreCompleto ??
+			u?.NombreCompleto ??
+			u?.nombre ??
+			u?.Nombre ??
+			u?.username ??
+			u?.Username ??
+			u?.email ??
+			u?.Email ??
+			"";
+		return { id: Number(id), nombre: String(nombreCompleto ?? "").trim(), _raw: u };
+	}
+
+	function normalizeMotivo(mm, idx) {
+		const id =
+			mm?.idMotivo ??
+			mm?.IdMotivo ??
+			mm?.id ??
+			mm?.Id ??
+			mm?.idMotivoMovimiento ??
+			mm?.IdMotivoMovimiento ??
+			idx;
+		const nombre = mm?.nombre ?? mm?.Nombre ?? mm?.descripcion ?? mm?.Descripcion ?? "";
+		return { id: Number(id), nombre: String(nombre ?? "").trim(), _raw: mm };
+	}
+
+	function normalizeMovimiento(m, idx) {
+		const id = m?.idMovimiento ?? m?.IdMovimiento ?? m?.id ?? m?.movimientoId ?? idx;
+
+		const rawDate = m?.fecha ?? m?.Fecha ?? m?.createdAt ?? m?.CreatedAt ?? m?.fechaMovimiento ?? m?.date ?? null;
+		const dt = rawDate ? new Date(rawDate) : null;
+
+		let tipo = m?.tipo ?? m?.Tipo ?? m?.tipoMovimiento ?? m?.movementType ?? "Entrada";
+		if (typeof tipo === "number") tipo = tipo === 1 ? "Entrada" : "Salida";
+		if (typeof tipo === "string") {
+			const t = tipo.toLowerCase();
+			if (t.startsWith("e")) tipo = "Entrada";
+			else if (t.startsWith("s")) tipo = "Salida";
+			else if (t === "entrada" || t === "salida") tipo = t[0].toUpperCase() + t.slice(1);
+		}
+
+		const idProducto = Number(m?.idProducto ?? m?.IdProducto ?? m?.productoId ?? 0) || null;
+		const idUsuario = Number(m?.idUsuario ?? m?.IdUsuario ?? m?.usuarioId ?? 0) || null;
+
+		const idMotivo =
+			Number(
+				m?.idMotivo ??
+				m?.IdMotivo ??
+				m?.idMotivoMovimiento ??
+				m?.IdMotivoMovimiento ??
+				m?.motivoId ??
+				0
+			) || null;
+
+		const motivoDirecto =
+			m?.motivoNombre ??
+			m?.MotivoNombre ??
+			m?.motivo?.nombre ??
+			m?.motivo?.descripcion ??
+			m?.Motivo?.Nombre ??
+			m?.motivo ??
+			m?.comentario ??
+			m?.reason ??
+			"";
+
+		return {
+			id,
+			_dt: dt && !isNaN(dt.getTime()) ? dt : null,
+			fechaIso: dt && !isNaN(dt.getTime()) ? dt.toISOString().slice(0, 10) : "",
+			tipo,
+			idProducto,
+			idUsuario,
+			idMotivo,
+			motivo: String(motivoDirecto ?? "").trim() || "",
+			cantidad: toNumber(m?.cantidad ?? m?.Cantidad ?? m?.qty ?? 0, 0),
+			_raw: m,
+		};
+	}
 
 	function buildFileName(tipo, desde, hasta) {
 		const t =
@@ -170,95 +303,148 @@
 				: tipo === "movimientos-mes"
 					? "Movimientos_Mes"
 					: "Stock_Critico";
-
 		const d = (desde || "sin_desde").replaceAll("-", "");
 		const h = (hasta || "sin_hasta").replaceAll("-", "");
 		return `Reporte_${t}_${d}_${h}.pdf`;
 	}
 
-	async function generateAndDownload() {
-		generating.value = true;
-		try {
-			// Intenta descargar desde la API (PDF real)
-			const params = new URLSearchParams();
-			params.set("tipo", form.tipo);
-			if (form.desde) params.set("desde", form.desde);
-			if (form.hasta) params.set("hasta", form.hasta);
+	function ymdToday() {
+		return new Date().toISOString().slice(0, 10);
+	}
 
-			const url = `${REPORTS_PDF_ENDPOINT}?${params.toString()}`;
+	function monthStart(d = new Date()) {
+		return new Date(d.getFullYear(), d.getMonth(), 1);
+	}
 
-			const res = await fetch(url, {
-				method: "GET",
-				headers: {
-					Accept: "application/pdf",
-				},
-			});
+	function monthEnd(d = new Date()) {
+		return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+	}
 
-			if (res.ok) {
-				const blob = await res.blob();
-				const fileName = buildFileName(form.tipo, form.desde, form.hasta);
-				downloadBlob(blob, fileName);
+	function clip(s, n) {
+		const t = String(s ?? "");
+		return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "…";
+	}
 
-				// agrega a recientes (simulado)
-				recentReports.value.unshift({
-					id: Date.now(),
-					nombre:
-						form.tipo === "stock-actual"
-							? "Reporte de Stock Actual"
-							: form.tipo === "movimientos-mes"
-								? "Movimientos del Mes"
-								: "Stock Crítico",
-					fecha: new Date().toLocaleString("es-DO"),
-					url: "",
-					fileName,
-				});
+	function toAsciiSafe(s) {
+		let t = String(s ?? "");
+		t = t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+		t = t.replace(/[“”]/g, '"').replace(/[‘’´`]/g, "'").replace(/—/g, "-");
+		t = t.replace(/[^\x20-\x7E]/g, "");
+		return t;
+	}
 
-				showToast("Reporte generado y descargado ✅", "ok");
-				return;
+	function escapePdfText(s) {
+		const t = toAsciiSafe(s);
+		return t.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)");
+	}
+
+	function pdfBuildFromPages(pages) {
+		const objects = [];
+		const offsets = [];
+
+		function addObject(body) {
+			objects.push(body);
+			return objects.length;
+		}
+
+		const fontHelv = addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+		const fontCour = addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>");
+
+		const pageObjNums = [];
+
+		for (const p of pages) {
+			const contentStream = p.content;
+			const len = new TextEncoder().encode(contentStream).length;
+
+			const contentsObj = addObject(`<< /Length ${len} >>\nstream\n${contentStream}\nendstream`);
+
+			const pageObj = addObject(
+				`<< /Type /Page /Parent PAGES_REF /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontHelv} 0 R /F2 ${fontCour} 0 R >> >> /Contents ${contentsObj} 0 R >>`
+			);
+			pageObjNums.push(pageObj);
+		}
+
+		const kids = pageObjNums.map((n) => `${n} 0 R`).join(" ");
+		const pagesObj = addObject(`<< /Type /Pages /Kids [${kids}] /Count ${pageObjNums.length} >>`);
+		const catalogObj = addObject(`<< /Type /Catalog /Pages ${pagesObj} 0 R >>`);
+
+		for (let i = 0; i < objects.length; i++) {
+			objects[i] = objects[i].replaceAll("PAGES_REF", `${pagesObj} 0 R`);
+		}
+
+		let pdf = "%PDF-1.4\n";
+		offsets.push(0);
+
+		for (let i = 0; i < objects.length; i++) {
+			offsets.push(new TextEncoder().encode(pdf).length);
+			pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+		}
+
+		const xrefStart = new TextEncoder().encode(pdf).length;
+		pdf += "xref\n";
+		pdf += `0 ${objects.length + 1}\n`;
+		pdf += "0000000000 65535 f \n";
+		for (let i = 1; i <= objects.length; i++) {
+			const off = offsets[i];
+			pdf += `${String(off).padStart(10, "0")} 00000 n \n`;
+		}
+
+		pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogObj} 0 R >>\n`;
+		pdf += "startxref\n";
+		pdf += `${xrefStart}\n`;
+		pdf += "%%EOF";
+
+		return new Blob([pdf], { type: "application/pdf" });
+	}
+
+	function pdfPagesFromLines({ title, subtitle, lines }) {
+		const maxLinesPerPage = 54;
+		const pages = [];
+		const chunks = [];
+		for (let i = 0; i < lines.length; i += maxLinesPerPage) chunks.push(lines.slice(i, i + maxLinesPerPage));
+		if (chunks.length === 0) chunks.push([]);
+
+		for (let pi = 0; pi < chunks.length; pi++) {
+			const bodyLines = chunks[pi];
+			const yTitle = 740;
+			const ySub = 712;
+			const yBodyStart = 680;
+			const lineH = 12;
+
+			const parts = [];
+			parts.push("BT");
+			parts.push("/F1 18 Tf");
+			parts.push(`72 ${yTitle} Td`);
+			parts.push(`(${escapePdfText(title)}) Tj`);
+			parts.push("ET");
+
+			parts.push("BT");
+			parts.push("/F1 12 Tf");
+			parts.push(`72 ${ySub} Td`);
+			parts.push(`(${escapePdfText(subtitle)}) Tj`);
+			parts.push("ET");
+
+			parts.push("BT");
+			parts.push("/F2 10 Tf");
+			parts.push(`72 ${yBodyStart} Td`);
+			for (let i = 0; i < bodyLines.length; i++) {
+				const txt = escapePdfText(bodyLines[i]);
+				parts.push(`(${txt}) Tj`);
+				if (i !== bodyLines.length - 1) parts.push(`0 -${lineH} Td`);
 			}
+			parts.push("ET");
 
-			// Fallback: si tu API no existe todavía, genera un PDF demo en el navegador
-			const fileName = buildFileName(form.tipo, form.desde, form.hasta);
-			const demoPdf = await generateDemoPdf({
-				tipo: form.tipo,
-				desde: form.desde,
-				hasta: form.hasta,
-			});
-			downloadBlob(demoPdf, fileName);
-			showToast("API no respondió PDF. Se descargó un PDF demo 🧾", "warn");
-		} catch (e) {
-			// último fallback: PDF demo
-			const fileName = buildFileName(form.tipo, form.desde, form.hasta);
-			const demoPdf = await generateDemoPdf({
-				tipo: form.tipo,
-				desde: form.desde,
-				hasta: form.hasta,
-			});
-			downloadBlob(demoPdf, fileName);
-			showToast("Error con la API. Se descargó un PDF demo ⚠️", "warn");
-		} finally {
-			generating.value = false;
+			const footer = `Pagina ${pi + 1} de ${chunks.length}`;
+			parts.push("BT");
+			parts.push("/F1 10 Tf");
+			parts.push(`72 40 Td`);
+			parts.push(`(${escapePdfText(footer)}) Tj`);
+			parts.push("ET");
+
+			pages.push({ content: parts.join("\n") });
 		}
-	}
 
-	function quickReport(tipo) {
-		form.tipo = tipo;
-		generateAndDownload();
-	}
-
-	function downloadFromUrl(url, fileName) {
-		if (url) {
-			// descarga real si tienes URL
-			const a = document.createElement("a");
-			a.href = url;
-			a.download = fileName || "reporte.pdf";
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			return;
-		}
-		// si no hay url, genera demo
-		generateAndDownload();
+		return pages;
 	}
 
 	function downloadBlob(blob, fileName) {
@@ -272,63 +458,165 @@
 		setTimeout(() => URL.revokeObjectURL(blobUrl), 800);
 	}
 
-	/**
-	 * PDF demo sin librerías:
-	 * genera un PDF súper simple (texto básico).
-	 * Si tú ya tienes backend que devuelve PDF, esto casi nunca se usará.
-	 */
-	async function generateDemoPdf({ tipo, desde, hasta }) {
-		// PDF minimal “Hello” (muy básico) construyendo bytes.
-		// Para un PDF elegante, lo ideal es backend o usar jspdf/pdf-lib.
-		const title =
-			tipo === "stock-actual"
-				? "Reporte: Stock Actual"
-				: tipo === "movimientos-mes"
-					? "Reporte: Movimientos del Mes"
-					: "Reporte: Stock Crítico";
-
-		const meta = `Desde: ${desde || "—"}   Hasta: ${hasta || "—"}`;
-
-		// PDF mínimo con 1 página, fuente Helvetica, 2 líneas
-		const content = [
-			"%PDF-1.4",
-			"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
-			"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
-			"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj",
-			"4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
-			"5 0 obj << /Length 6 0 R >> stream",
-			"BT",
-			"/F1 18 Tf",
-			"72 720 Td",
-			`(${escapePdfText(title)}) Tj`,
-			"0 -28 Td",
-			"/F1 12 Tf",
-			`(${escapePdfText(meta)}) Tj`,
-			"ET",
-			"endstream endobj",
-			"6 0 obj 999 endobj", // placeholder length (no estrictamente correcto, pero la mayoría abre)
-			"xref",
-			"0 7",
-			"0000000000 65535 f ",
-			"trailer << /Size 7 /Root 1 0 R >>",
-			"startxref",
-			"0",
-			"%%EOF",
-		].join("\n");
-
-		return new Blob([content], { type: "application/pdf" });
+	function col(val, width, align = "left") {
+		const t = toAsciiSafe(val);
+		if (t.length === width) return t;
+		if (t.length > width) return clip(t, width);
+		if (align === "right") return t.padStart(width, " ");
+		return t.padEnd(width, " ");
 	}
 
-	function escapePdfText(s) {
-		return String(s ?? "")
-			.replaceAll("\\", "\\\\")
-			.replaceAll("(", "\\(")
-			.replaceAll(")", "\\)");
+	function rowSep(totalWidth) {
+		return "-".repeat(totalWidth);
+	}
+
+	async function buildReportPdf(tipo, desde, hasta) {
+		const [prodsRaw, usersPack, motivosPack, movsRaw] = await Promise.all([
+			fetchJson(PRODUCTOS_ENDPOINT),
+			fetchFirstList(USUARIOS_ENDPOINTS),
+			fetchFirstList(MOTIVOS_ENDPOINTS),
+			fetchJson(MOVS_ENDPOINT),
+		]);
+
+		const productos = normalizeList(prodsRaw).map((p, i) => normalizeProducto(p, i)).filter((p) => p.id && p.nombre);
+		const usuarios = normalizeList(usersPack.list).map((u, i) => normalizeUsuario(u, i)).filter((u) => u.id && u.nombre);
+		const motivos = normalizeList(motivosPack.list).map((m, i) => normalizeMotivo(m, i)).filter((m) => m.id && m.nombre);
+		const movimientos = normalizeList(movsRaw).map((m, i) => normalizeMovimiento(m, i));
+
+		const prodById = new Map(productos.map((p) => [Number(p.id), p]));
+		const userById = new Map(usuarios.map((u) => [Number(u.id), u]));
+		const motivoById = new Map(motivos.map((mm) => [Number(mm.id), mm]));
+
+		if (tipo === "stock-actual") {
+			const t = "Reporte: Stock Actual";
+			const sub = `Fecha: ${ymdToday()}   Desde: ${desde || "—"}   Hasta: ${hasta || "—"}   Total: ${productos.length}`;
+
+			const totalW = 96;
+			const lines = [];
+			lines.push(`| ${col("ID", 5)} | ${col("PRODUCTO", 34)} | ${col("CATEGORIA", 26)} | ${col("STOCK", 9, "right")} | ${col("MIN", 7, "right")} |`);
+			lines.push(rowSep(totalW));
+
+			const ordered = [...productos].sort((a, b) => toAsciiSafe(a.nombre).localeCompare(toAsciiSafe(b.nombre)));
+			for (const p of ordered) {
+				lines.push(
+					`| ${col(p.id, 5)} | ${col(p.nombre, 34)} | ${col(p.categoriaNombre || "—", 26)} | ${col(p.stock, 9, "right")} | ${col(p.minimo, 7, "right")} |`
+				);
+			}
+
+			const pages = pdfPagesFromLines({ title: t, subtitle: sub, lines });
+			return pdfBuildFromPages(pages);
+		}
+
+		if (tipo === "stock-critico") {
+			const crit = productos.filter((p) => toNumber(p.minimo, 0) > 0 && toNumber(p.stock, 0) <= toNumber(p.minimo, 0));
+			const t = "Reporte: Stock Critico";
+			const sub = `Fecha: ${ymdToday()}   Total criticos: ${crit.length}`;
+
+			const totalW = 96;
+			const lines = [];
+			lines.push(`| ${col("ID", 5)} | ${col("PRODUCTO", 34)} | ${col("CATEGORIA", 26)} | ${col("STOCK", 9, "right")} | ${col("MIN", 7, "right")} |`);
+			lines.push(rowSep(totalW));
+
+			const ordered = [...crit].sort((a, b) => (toNumber(a.stock) - toNumber(a.minimo)) - (toNumber(b.stock) - toNumber(b.minimo)));
+			for (const p of ordered) {
+				lines.push(
+					`| ${col(p.id, 5)} | ${col(p.nombre, 34)} | ${col(p.categoriaNombre || "—", 26)} | ${col(p.stock, 9, "right")} | ${col(p.minimo, 7, "right")} |`
+				);
+			}
+
+			const pages = pdfPagesFromLines({ title: t, subtitle: sub, lines });
+			return pdfBuildFromPages(pages);
+		}
+
+		const now = new Date();
+		const from = monthStart(now);
+		const to = monthEnd(now);
+		const fromIso = from.toISOString().slice(0, 10);
+		const toIso = to.toISOString().slice(0, 10);
+
+		const list = movimientos
+			.filter((m) => m._dt && m._dt >= from && m._dt <= new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59, 999))
+			.sort((a, b) => (b._dt ? b._dt.getTime() : 0) - (a._dt ? a._dt.getTime() : 0));
+
+		const t = "Reporte: Movimientos del Mes";
+		const sub = `Periodo: ${fromIso} a ${toIso}   Total: ${list.length}`;
+
+		const totalW = 112;
+		const lines = [];
+		lines.push(`| ${col("FECHA", 10)} | ${col("TIPO", 8)} | ${col("CANT", 6, "right")} | ${col("PRODUCTO", 34)} | ${col("MOTIVO", 20)} | ${col("USUARIO", 22)} |`);
+		lines.push(rowSep(totalW));
+
+		for (const m of list) {
+			const prod = prodById.get(Number(m.idProducto))?.nombre || `ID ${m.idProducto || "—"}`;
+			const usu = userById.get(Number(m.idUsuario))?.nombre || `ID ${m.idUsuario || "—"}`;
+			const mot = (m.motivo?.trim() || "") || motivoById.get(Number(m.idMotivo))?.nombre || `ID ${m.idMotivo || "—"}`;
+			lines.push(
+				`| ${col(m.fechaIso || "", 10)} | ${col(m.tipo, 8)} | ${col(m.cantidad, 6, "right")} | ${col(prod, 34)} | ${col(mot, 20)} | ${col(usu, 22)} |`
+			);
+		}
+
+		const pages = pdfPagesFromLines({ title: t, subtitle: sub, lines });
+		return pdfBuildFromPages(pages);
+	}
+
+	async function generateAndDownload() {
+		generating.value = true;
+		try {
+			const tipo = form.tipo;
+			const desde = form.desde || "";
+			const hasta = form.hasta || "";
+
+			const blob = await buildReportPdf(tipo, desde, hasta);
+			const fileName = buildFileName(tipo, desde, hasta);
+			downloadBlob(blob, fileName);
+
+			recentReports.value.unshift({
+				id: Date.now(),
+				tipo,
+				nombre:
+					tipo === "stock-actual"
+						? "Reporte de Stock Actual"
+						: tipo === "movimientos-mes"
+							? "Movimientos del Mes"
+							: "Stock Crítico",
+				fecha: new Date().toLocaleString("es-DO"),
+				url: "",
+				fileName,
+				desde,
+				hasta,
+			});
+
+			showToast("Reporte generado y descargado ✅", "ok");
+		} catch (e) {
+			showToast(e?.message || "No se pudo generar el reporte.", "warn");
+		} finally {
+			generating.value = false;
+		}
+	}
+
+	function quickReport(tipo) {
+		form.tipo = tipo;
+		generateAndDownload();
+	}
+
+	function downloadFromUrl(url, fileName, tipo, desde, hasta) {
+		if (url) {
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = fileName || "reporte.pdf";
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			return;
+		}
+		form.tipo = tipo || form.tipo;
+		form.desde = desde || form.desde;
+		form.hasta = hasta || form.hasta;
+		generateAndDownload();
 	}
 </script>
 
 <style scoped>
-	/* Page base */
 	.page {
 		min-height: 100vh;
 		background: #f3f6ff;
@@ -338,7 +626,6 @@
 		padding: 22px;
 	}
 
-	/* Header */
 	.hdr {
 		display: flex;
 		align-items: center;
@@ -375,7 +662,6 @@
 		color: #0f172a;
 	}
 
-	/* Cards */
 	.card {
 		background: rgba(255, 255, 255, 0.92);
 		border: 1px solid rgba(15, 23, 42, 0.08);
@@ -395,7 +681,6 @@
 		margin-bottom: 14px;
 	}
 
-	/* ✅ Generar Reporte layout */
 	.gen-grid {
 		display: grid !important;
 		grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.8fr);
@@ -404,10 +689,9 @@
 		min-width: 0;
 	}
 
-	/* ✅ Fechas separadas sí o sí */
 	.datesRow {
 		display: flex;
-		gap: 26px; /* separación real */
+		gap: 26px;
 		min-width: 0;
 	}
 
@@ -440,7 +724,6 @@
 			box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
 		}
 
-	/* select */
 	.selectWrap {
 		position: relative;
 	}
@@ -474,7 +757,6 @@
 		pointer-events: none;
 	}
 
-	/* date wrapper (por si el navegador agrega iconos) */
 	.dateWrap {
 		width: 100%;
 	}
@@ -483,7 +765,13 @@
 			width: 100%;
 		}
 
-	/* Button generar */
+	.hint {
+		margin-top: 10px;
+		color: #64748b;
+		font-weight: 800;
+		font-size: 12px;
+	}
+
 	.btnGen {
 		margin-top: 14px;
 		border: 0;
@@ -512,7 +800,6 @@
 		font-weight: 900;
 	}
 
-	/* grid 3 cards */
 	.grid3 {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -569,7 +856,6 @@
 		padding: 0;
 	}
 
-	/* Recent reports */
 	.card.recent {
 		padding: 18px;
 	}
@@ -626,7 +912,6 @@
 		cursor: pointer;
 	}
 
-	/* Toast */
 	.toast {
 		position: fixed;
 		right: 18px;
@@ -651,7 +936,6 @@
 			background: rgba(239, 68, 68, 0.08);
 		}
 
-	/* Responsive */
 	@media (max-width: 1100px) {
 		.grid3 {
 			grid-template-columns: 1fr;

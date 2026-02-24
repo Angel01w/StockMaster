@@ -5,7 +5,6 @@ using StockMaster.Infrastructure.Data;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using BCrypt.Net;
 
 namespace StockMaster.API.Controllers;
 
@@ -23,7 +22,12 @@ public class AuthController : ControllerBase
     }
 
     public record RegisterRequest(string NombreCompleto, string Email, string Username, string Password);
-    public record LoginRequest(string Username, string Password);
+
+  
+    public record LoginRequest(string Login, string Password);
+
+    
+    public record ResetPasswordRequest(string Username, string NewPassword);
 
     public record AuthResponse(
         int IdUsuario,
@@ -43,10 +47,13 @@ public class AuthController : ControllerBase
             string.IsNullOrWhiteSpace(req.Password))
             return BadRequest("Todos los campos son obligatorios.");
 
-        var emailExists = await _db.Usuarios.AnyAsync(x => x.Email == req.Email);
+        var email = req.Email.Trim();
+        var username = req.Username.Trim();
+
+        var emailExists = await _db.Usuarios.AnyAsync(x => x.Email == email);
         if (emailExists) return BadRequest("Ese email ya está registrado.");
 
-        var userExists = await _db.Usuarios.AnyAsync(x => x.Username == req.Username);
+        var userExists = await _db.Usuarios.AnyAsync(x => x.Username == username);
         if (userExists) return BadRequest("Ese usuario ya existe.");
 
         // Rol por defecto: Usuario
@@ -56,8 +63,8 @@ public class AuthController : ControllerBase
         var user = new StockMaster.Domain.Entities.Usuario
         {
             NombreCompleto = req.NombreCompleto.Trim(),
-            Email = req.Email.Trim(),
-            Username = req.Username.Trim(),
+            Email = email,
+            Username = username,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
             IdRole = role.IdRole,
             Estado = "Activo",
@@ -82,13 +89,18 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequest req)
     {
-        if (string.IsNullOrWhiteSpace(req.Username) || string.IsNullOrWhiteSpace(req.Password))
+        if (string.IsNullOrWhiteSpace(req.Login) || string.IsNullOrWhiteSpace(req.Password))
             return BadRequest("Usuario y contraseña son obligatorios.");
 
-        var user = await _db.Usuarios.FirstOrDefaultAsync(x => x.Username == req.Username);
+        var login = req.Login.Trim().ToLower();
+
+        // ✅ Busca por username o email (case-insensitive)
+        var user = await _db.Usuarios.FirstOrDefaultAsync(x =>
+            x.Username.ToLower() == login || x.Email.ToLower() == login);
+
         if (user is null) return Unauthorized("Credenciales inválidas.");
 
-        if (user.Estado != "Activo")
+        if (!string.Equals(user.Estado, "Activo", StringComparison.OrdinalIgnoreCase))
             return Unauthorized("Usuario inactivo.");
 
         var ok = BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash);
@@ -112,6 +124,25 @@ public class AuthController : ControllerBase
             roleName,
             token
         ));
+    }
+
+    // ⚠️ TEMPORAL (DEV): resetear contraseña para poder probar usuarios sembrados
+    // Borra este endpoint cuando termines.
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword(ResetPasswordRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.Username) || string.IsNullOrWhiteSpace(req.NewPassword))
+            return BadRequest("Username y NewPassword son obligatorios.");
+
+        var username = req.Username.Trim();
+
+        var user = await _db.Usuarios.FirstOrDefaultAsync(x => x.Username == username);
+        if (user is null) return NotFound("Usuario no existe.");
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.NewPassword);
+        await _db.SaveChangesAsync();
+
+        return Ok("Password actualizado.");
     }
 
     private string GenerateJwt(int idUsuario, string username, string role)

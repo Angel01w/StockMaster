@@ -1,9 +1,7 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StockMaster.Domain.Entities;
 using StockMaster.Infrastructure.Data;
-using BCrypt.Net;
 
 namespace StockMaster.API.Controllers;
 

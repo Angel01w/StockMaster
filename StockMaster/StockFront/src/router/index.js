@@ -49,10 +49,19 @@ const router = createRouter({
     routes,
 });
 
+function safeParseUser() {
+    try {
+        const raw = localStorage.getItem("sm_user");
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        localStorage.removeItem("sm_user");
+        return null;
+    }
+}
+
 router.beforeEach((to) => {
     const token = localStorage.getItem("sm_token");
-    const raw = localStorage.getItem("sm_user");
-    const user = raw ? JSON.parse(raw) : null;
+    const user = safeParseUser();
 
     const roleRaw = (user?.rol || user?.role || "").toString().trim().toLowerCase();
     const isAdmin = roleRaw === "admin" || roleRaw === "administrador" || roleRaw.includes("admin");

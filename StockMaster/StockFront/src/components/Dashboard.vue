@@ -64,12 +64,14 @@
             <div class="card-head">
                 <div class="h">Resumen General del Inventario</div>
 
-                <div style="display:flex; gap:10px; align-items:center;">
-                    <!-- ✅ LOGOUT -->
-                    <button class="dd" type="button" @click="logout" :disabled="loggingOut">
-                        {{ loggingOut ? "Saliendo..." : "Log out" }}
-                    </button>
+                <div class="head-mid">
+                    <div class="legendTop">
+                        <span class="lg"><i class="sw g"></i><span class="lg-txt">Entradas</span></span>
+                        <span class="lg"><i class="sw b"></i><span class="lg-txt">Salidas</span></span>
+                    </div>
+                </div>
 
+                <div style="display:flex; gap:10px; align-items:center;">
                     <button class="dd" type="button" @click="toggleRange">
                         Últimos {{ rangeMonths }} meses
                         <span class="chev">⌄</span>
@@ -99,11 +101,6 @@
                         </g>
                     </svg>
 
-                    <div class="legend">
-                        <span class="lg"><i class="sw g"></i>Entradas</span>
-                        <span class="lg"><i class="sw b"></i>Salidas</span>
-                    </div>
-
                     <div class="months">
                         <span v-for="m in months" :key="m">{{ m }}</span>
                     </div>
@@ -115,9 +112,6 @@
             <div class="card">
                 <div class="card-head">
                     <div class="h">Productos con Stock Bajo</div>
-                    <button class="dd" type="button" @click="goLowStock">
-                        Ver Todos <span class="chev">⌄</span>
-                    </button>
                 </div>
 
                 <div class="table">
@@ -146,7 +140,6 @@
                             <span class="ok">✓</span>
                             <span>Mostrando {{ lowStockRows.length }} de {{ lowStockTotal }} productos con stock bajo</span>
                         </div>
-                        <button class="btn" type="button" @click="goLowStock">Ver Todos</button>
                     </div>
                 </div>
             </div>
@@ -154,9 +147,6 @@
             <div class="card">
                 <div class="card-head">
                     <div class="h">Últimos Movimientos</div>
-                    <button class="dd" type="button" @click="goMovimientos">
-                        Ver Historial <span class="chev">⌄</span>
-                    </button>
                 </div>
 
                 <div class="table">
@@ -182,7 +172,6 @@
                             <span class="clock">🕒</span>
                             <span>Últimos {{ movRows.length }} movimientos registrados</span>
                         </div>
-                        <button class="btn" type="button" @click="goMovimientos">Ver Historial</button>
                     </div>
                 </div>
             </div>
@@ -247,76 +236,6 @@
     });
     onMounted(() => loadAll());
 
-    /** =========================
-     * ✅ LOGOUT (SIEMPRE REDIRIGE)
-     * ========================= */
-    const loggingOut = ref(false);
-
-    function clearAuthStorage() {
-        // borra TODO lo que huela a sesión (por si tu app usa nombres distintos)
-        const keys = [
-            "token",
-            "access_token",
-            "authToken",
-            "jwt",
-            "user",
-            "usuario",
-            "auth",
-            "session",
-            "refreshToken",
-        ];
-
-        keys.forEach((k) => {
-            localStorage.removeItem(k);
-            sessionStorage.removeItem(k);
-        });
-
-        // si guardaste algo con prefijo
-        for (const k of Object.keys(localStorage)) {
-            if (k.toLowerCase().includes("token") || k.toLowerCase().includes("auth") || k.toLowerCase().includes("user")) {
-                localStorage.removeItem(k);
-            }
-        }
-        for (const k of Object.keys(sessionStorage)) {
-            if (k.toLowerCase().includes("token") || k.toLowerCase().includes("auth") || k.toLowerCase().includes("user")) {
-                sessionStorage.removeItem(k);
-            }
-        }
-    }
-
-    async function logout() {
-        if (loggingOut.value) return;
-        loggingOut.value = true;
-
-        try {
-            // (opcional) si tienes endpoint real:
-            // await fetch(`${API_BASE}/api/Auth/logout`, { method: "POST" });
-
-            clearAuthStorage();
-
-            // fuerza navegación (aunque router esté “raro”)
-            try {
-                await router.replace({ path: "/login" });
-            } catch {
-                // fallback duro
-                window.location.href = "/login";
-                return;
-            }
-
-            // por si hay guards que “devuelven” al dashboard, forzamos recarga en login
-            setTimeout(() => {
-                if (window.location.pathname !== "/login") {
-                    window.location.replace("/login");
-                }
-            }, 50);
-        } finally {
-            loggingOut.value = false;
-        }
-    }
-
-    /** =========================
-     * HELPERS
-     * ========================= */
     function normalizeList(data) {
         if (Array.isArray(data)) return data;
         if (Array.isArray(data?.$values)) return data.$values;
@@ -384,7 +303,6 @@
         return { url: endpoints[0], list: [], error: lastErr?.message || "No se pudo cargar lista." };
     }
 
-    /** ====== NORMALIZERS ====== */
     function extractCategoriaNombre(raw) {
         const c = raw?.categoria ?? raw?.Categoria ?? raw?.category ?? raw?.categoriaDto ?? null;
 
@@ -499,7 +417,6 @@
         };
     }
 
-    /** ====== RESOLVERS ====== */
     function resolveProductoNombre(m) {
         const direct =
             m?._raw?.productoNombre ??
@@ -555,7 +472,6 @@
         return found?.nombre || `ID ${id}`;
     }
 
-    /** ====== LOAD ====== */
     async function loadAll() {
         loading.value = true;
         error.value = "";
@@ -711,7 +627,6 @@
         }));
     }
 
-    /** ====== CHART HELPERS ====== */
     const W = 920, H = 230, PAD_TOP = 18, PAD_BOTTOM = 38, PAD_LR = 34;
 
     const maxY = computed(() => {
@@ -753,13 +668,9 @@
         if (movimientosRaw.value.length > 0) computeChartFromMovs();
         else loadAll();
     }
-
-    function goLowStock() { console.log("Ir a low stock"); }
-    function goMovimientos() { console.log("Ir a movimientos"); }
 </script>
 
 <style scoped>
-    /* (tu mismo CSS, sin cambios) */
     .dash {
         display: flex;
         flex-direction: column;
@@ -894,6 +805,14 @@
         font-size: 16px;
     }
 
+    .head-mid {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        padding: 0 12px;
+        min-width: 0;
+    }
+
     .dd {
         border: 1px solid rgba(15,23,42,.10);
         background: rgba(255,255,255,.65);
@@ -911,6 +830,49 @@
         opacity: .7;
         font-weight: 900;
     }
+
+    .legendTop {
+        display: inline-flex;
+        align-items: center;
+        gap: 18px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: rgba(255,255,255,.88);
+        border: 1px solid rgba(15,23,42,.10);
+        box-shadow: 0 10px 18px rgba(0,0,0,.08);
+        color: #0f172a;
+        font-weight: 1000;
+        backdrop-filter: blur(6px);
+        max-width: 100%;
+    }
+
+    .lg {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        white-space: nowrap;
+    }
+
+    .lg-txt {
+        color: #0f172a;
+        text-shadow: 0 1px 0 rgba(255,255,255,.6);
+    }
+
+    .sw {
+        width: 26px;
+        height: 8px;
+        border-radius: 999px;
+        display: inline-block;
+    }
+
+        .sw.g {
+            background: #35c38a;
+        }
+
+        .sw.b {
+            background: #2a64f3;
+        }
 
     .chart-body {
         display: grid;
@@ -976,39 +938,6 @@
             fill: #2a64f3;
         }
 
-    .legend {
-        position: absolute;
-        left: 50%;
-        transform: translateX(-50%);
-        bottom: 38px;
-        display: flex;
-        gap: 22px;
-        color: #64748b;
-        font-weight: 900;
-    }
-
-    .lg {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-    }
-
-    .sw {
-        width: 26px;
-        height: 8px;
-        border-radius: 999px;
-        display: inline-block;
-    }
-
-        .sw.g {
-            background: #35c38a;
-        }
-
-        .sw.b {
-            background: #2a64f3;
-        }
-
     .months {
         position: absolute;
         left: 16px;
@@ -1072,14 +1001,6 @@
         gap: 12px;
     }
 
-    .pimg {
-        width: 44px;
-        height: 28px;
-        border-radius: 8px;
-        background: linear-gradient(180deg, rgba(15,23,42,.10), rgba(15,23,42,.03));
-        border: 1px solid rgba(15,23,42,.10);
-    }
-
     .pname {
         font-weight: 1000;
         color: #0f172a;
@@ -1117,16 +1038,6 @@
         opacity: .8;
     }
 
-    .btn {
-        padding: 8px 12px;
-        border-radius: 12px;
-        border: 1px solid rgba(37,99,235,.18);
-        background: rgba(37,99,235,.08);
-        color: #1d4ed8;
-        font-weight: 1000;
-        cursor: pointer;
-    }
-
     .thead.mov, .row.mov {
         grid-template-columns: .9fr .7fr 1.3fr 1fr 1fr;
     }
@@ -1159,6 +1070,14 @@
 
         .bottom {
             grid-template-columns: 1fr;
+        }
+
+        .head-mid {
+            justify-content: flex-end;
+        }
+
+        .legendTop {
+            margin-left: auto;
         }
     }
 </style>

@@ -152,10 +152,17 @@
 
 							<div class="field">
 								<label>Tipo de Movimiento</label>
-								<select v-model="form.tipo">
+								<!-- ✅ Cambia automáticamente según el Motivo:
+								- Entrada => fija Entrada y bloquea
+								- Salida => fija Salida y bloquea
+								- Ambos  => permite elegir -->
+								<select v-model="form.tipo" :disabled="tipoBloqueado">
 									<option value="Entrada">Entrada</option>
 									<option value="Salida">Salida</option>
 								</select>
+								<div v-if="tipoBloqueado" class="miniHint">
+									El tipo se ajusta automáticamente según el motivo seleccionado.
+								</div>
 							</div>
 						</div>
 
@@ -238,7 +245,7 @@
 </template>
 
 <script setup>
-	import { computed, onMounted, reactive, ref } from "vue";
+	import { computed, onMounted, reactive, ref, watch } from "vue";
 
 	const API_BASE = "https://localhost:7198";
 	const MOV_ENDPOINT = `${API_BASE}/api/Movimientos`;
@@ -296,6 +303,41 @@
 	});
 	const form = reactive(emptyForm());
 
+	// =========================
+	// ✅ NUEVO: Tipo depende del Motivo (TipoAplica)
+	// - Entrada => fija "Entrada" y bloquea select
+	// - Salida  => fija "Salida" y bloquea select
+	// - Ambos   => deja elegir
+	// =========================
+	const motivoSeleccionado = computed(() => {
+		const id = Number(form.idMotivo);
+		if (!id) return null;
+		return motivos.value.find((m) => Number(m.idMotivo) === id) ?? null;
+	});
+
+	const tipoAplicaNorm = computed(() => {
+		const v = motivoSeleccionado.value?.tipoAplica;
+		return String(v ?? "").trim().toLowerCase(); // "entrada" | "salida" | "ambos" | ""
+	});
+
+	const tipoBloqueado = computed(() => {
+		return tipoAplicaNorm.value === "entrada" || tipoAplicaNorm.value === "salida";
+	});
+
+	function syncTipoConMotivo() {
+		const t = tipoAplicaNorm.value;
+		if (t === "entrada") form.tipo = "Entrada";
+		else if (t === "salida") form.tipo = "Salida";
+		// ambos => no forzamos
+	}
+
+	watch(
+		() => form.idMotivo,
+		() => {
+			syncTipoConMotivo();
+		}
+	);
+
 	onMounted(async () => {
 		await loadAll();
 	});
@@ -306,6 +348,8 @@
 		try {
 			await Promise.all([loadProductos(), loadMotivos(), loadUsuarios()]);
 			await loadMovimientos();
+			// por si el primer motivo ya viene seteado
+			syncTipoConMotivo();
 		} catch (e) {
 			loadError.value = e?.message ?? "Error cargando inventario.";
 		} finally {
@@ -342,7 +386,7 @@
 			...m,
 			idMotivo: idMotivo != null ? Number(idMotivo) : null,
 			nombre: String(nombre ?? "").trim(),
-			tipoAplica,
+			tipoAplica, // ← aquí viene "Entrada" | "Salida" | "Ambos"
 		};
 	}
 
@@ -525,6 +569,9 @@
 			if (motivos.value.length > 0 && form.idMotivo == null) {
 				form.idMotivo = Number(motivos.value[0].idMotivo);
 			}
+
+			// ✅ si setea el primer motivo, sincroniza el tipo
+			syncTipoConMotivo();
 		} catch (e) {
 			motivos.value = [];
 			motivosError.value = e?.message ?? "No se pudieron cargar los motivos.";
@@ -596,6 +643,8 @@
 			idMotivo: motivos.value?.[0]?.idMotivo ?? null,
 			idUsuario: usuarios.value?.[0]?.idUsuario ?? null,
 		});
+		// ✅ sincroniza tipo según el motivo precargado
+		syncTipoConMotivo();
 		isOpen.value = true;
 	}
 
@@ -683,6 +732,14 @@
 	.miniWarn {
 		margin-top: 8px;
 		color: #b45309;
+		font-weight: 800;
+		font-size: 12px;
+	}
+
+	/* ✅ NUEVO: hint para el select bloqueado */
+	.miniHint {
+		margin-top: 8px;
+		color: #475569;
 		font-weight: 800;
 		font-size: 12px;
 	}
