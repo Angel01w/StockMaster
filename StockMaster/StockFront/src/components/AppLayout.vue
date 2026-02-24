@@ -31,7 +31,7 @@
 					<i class="dot"></i> Reportes
 				</RouterLink>
 
-				<RouterLink to="/usuarios" class="mi" active-class="active">
+				<RouterLink v-if="canSeeUsuarios" to="/usuarios" class="mi" active-class="active">
 					<i class="dot"></i> Usuarios
 				</RouterLink>
 			</nav>
@@ -70,8 +70,8 @@
 					<button class="iconBtn" title="Buscar">🔍</button>
 
 					<div class="user">
-						<img class="avatar" src="https://i.pravatar.cc/38?img=3" alt="Admin" />
-						<span class="uname">Admin</span>
+						<img class="avatar" src="https://i.pravatar.cc/38?img=3" :alt="rolTexto" />
+						<span class="uname">{{ rolTexto }}</span>
 					</div>
 				</div>
 			</header>
@@ -86,12 +86,26 @@
 <script setup>
 	import { computed } from "vue";
 	import { RouterLink, useRoute, useRouter } from "vue-router";
+	import { getUser, logout as authLogout } from "../router/auth.service";
+	import { roleLabel } from "../services/permissions";
 
 	const route = useRoute();
 	const router = useRouter();
 
+	const user = computed(() => getUser());
+
+	const rolTexto = computed(() => {
+		const r = user.value?.role || user.value?.rol || user.value?.roleLabel || "";
+		return roleLabel(r) || "Usuario";
+	});
+
+	const canSeeUsuarios = computed(() => {
+		const r = (user.value?.role || user.value?.rol || user.value?.roleLabel || "").toString().trim().toLowerCase();
+		return r.includes("admin") || r.includes("audit");
+	});
+
 	const logout = async () => {
-		localStorage.removeItem("sm_token");
+		authLogout();
 		sessionStorage.removeItem("sm_token");
 		await router.replace("/login");
 		window.location.reload();

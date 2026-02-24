@@ -15,7 +15,7 @@
 					</div>
 				</div>
 
-				<button class="btn-primary" type="button" @click="openCreate">
+				<button v-if="canEdit" class="btn-primary" type="button" @click="openCreate">
 					<span class="plus">＋</span>
 					Nuevo Producto
 				</button>
@@ -56,11 +56,13 @@
 						<div class="actions-h">Acciones</div>
 					</div>
 
-					<div v-if="!loading && filteredRows.length === 0" class="empty">
+					<div v-if="loading" class="empty">Cargando productos...</div>
+
+					<div v-else-if="filteredRows.length === 0" class="empty">
 						No hay productos. Crea uno con “Nuevo Producto”.
 					</div>
 
-					<div class="trow" v-for="p in visibleRows" :key="rowKey(p)">
+					<div v-else class="trow" v-for="p in visibleRows" :key="rowKey(p)">
 						<div class="code">{{ p.codigo }}</div>
 
 						<div class="prod">
@@ -75,12 +77,14 @@
 						<div class="num price">{{ money(p.precioVenta) }}</div>
 
 						<div class="num" :class="Number(p.stockActual) <= Number(p.stockMinimo) ? 'stock-low' : 'stock-ok'">
-							{{ p.stockActual }}
+							{{ Number(p.stockActual ?? 0) }}
 						</div>
 
 						<div class="actions">
-							<button class="icon-btn edit" type="button" title="Editar" aria-label="Editar" @click="openEdit(p)">✎</button>
-							<button class="icon-btn del" type="button" title="Eliminar" aria-label="Eliminar" @click="removeProduct(p)">🗑</button>
+							<button v-if="canEdit" class="icon-btn edit" type="button" title="Editar" aria-label="Editar" @click="openEdit(p)">✎</button>
+							<button v-if="canEdit" class="icon-btn del" type="button" title="Eliminar" aria-label="Eliminar" @click="removeProduct(p)">🗑</button>
+
+							<span v-if="!canEdit" class="muted">Solo lectura</span>
 						</div>
 					</div>
 
@@ -96,7 +100,7 @@
 				</div>
 			</div>
 
-			<div v-if="isOpen" class="modalOverlay" @click.self="closeModal">
+			<div v-if="isOpen && canEdit" class="modalOverlay" @click.self="closeModal">
 				<div class="modal" role="dialog" aria-modal="true">
 					<div class="modalHead">
 						<div class="modalTitle">
@@ -111,24 +115,24 @@
 						<div class="grid2">
 							<div class="field">
 								<label>Código</label>
-								<input v-model.trim="form.codigo" autocomplete="off" />
+								<input v-model.trim="form.codigo" autocomplete="off" :disabled="!canEdit" />
 							</div>
 
 							<div class="field">
 								<label>Nombre</label>
-								<input v-model.trim="form.nombre" autocomplete="off" />
+								<input v-model.trim="form.nombre" autocomplete="off" :disabled="!canEdit" />
 							</div>
 						</div>
 
 						<div class="field">
 							<label>Descripción</label>
-							<textarea v-model.trim="form.descripcion" rows="4"></textarea>
+							<textarea v-model.trim="form.descripcion" rows="4" :disabled="!canEdit"></textarea>
 						</div>
 
 						<div class="grid2">
 							<div class="field">
 								<label>Categoría</label>
-								<select v-model.number="form.idCategoria" :disabled="categoriasLoading">
+								<select v-model.number="form.idCategoria" :disabled="categoriasLoading || !canEdit">
 									<option :value="0" disabled>
 										{{ categoriasLoading ? "Cargando categorías..." : "Seleccione una categoría" }}
 									</option>
@@ -145,7 +149,7 @@
 
 							<div class="field">
 								<label>Proveedor</label>
-								<select v-model.number="form.idProveedor" :disabled="proveedoresLoading">
+								<select v-model.number="form.idProveedor" :disabled="proveedoresLoading || !canEdit">
 									<option :value="0" disabled>
 										{{ proveedoresLoading ? "Cargando proveedores..." : "Seleccione un proveedor" }}
 									</option>
@@ -164,12 +168,12 @@
 						<div class="grid2">
 							<div class="field">
 								<label>Precio Compra</label>
-								<input type="number" step="0.01" min="0" inputmode="decimal" v-model.number="form.precioCompra" />
+								<input type="number" step="0.01" min="0" inputmode="decimal" v-model.number="form.precioCompra" :disabled="!canEdit" />
 							</div>
 
 							<div class="field">
 								<label>Precio Venta</label>
-								<input type="number" step="0.01" min="0" inputmode="decimal" v-model.number="form.precioVenta" />
+								<input type="number" step="0.01" min="0" inputmode="decimal" v-model.number="form.precioVenta" :disabled="!canEdit" />
 							</div>
 						</div>
 
@@ -181,8 +185,9 @@
 									   step="1"
 									   inputmode="numeric"
 									   autocomplete="off"
-									   :value="form.stockActual"
-									   @input="form.stockActual = $event.target.value === '' ? 0 : $event.target.valueAsNumber" />
+									   :value="Number(form.stockActual ?? 0)"
+									   @input="form.stockActual = $event.target.value === '' ? 0 : $event.target.valueAsNumber"
+									   :disabled="!canEdit" />
 							</div>
 
 							<div class="field half">
@@ -191,8 +196,9 @@
 									   min="0"
 									   step="1"
 									   inputmode="numeric"
-									   :value="form.stockMinimo"
-									   @input="form.stockMinimo = $event.target.value === '' ? 0 : $event.target.valueAsNumber" />
+									   :value="Number(form.stockMinimo ?? 0)"
+									   @input="form.stockMinimo = $event.target.value === '' ? 0 : $event.target.valueAsNumber"
+									   :disabled="!canEdit" />
 							</div>
 						</div>
 					</div>
@@ -200,7 +206,7 @@
 					<div class="modalFoot">
 						<button class="btnLink" type="button" @click="closeModal">Cancelar</button>
 
-						<button class="btnPrimary" type="button" :disabled="saving || categoriasLoading || proveedoresLoading" @click="saveProduct">
+						<button class="btnPrimary" type="button" :disabled="saving || categoriasLoading || proveedoresLoading || !canEdit" @click="saveProduct">
 							{{ saving ? (mode === "create" ? "Creando..." : "Guardando...") : (mode === "create" ? "Crear Producto" : "Guardar Cambios") }}
 						</button>
 					</div>
@@ -213,6 +219,12 @@
 
 <script setup>
 	import { computed, onMounted, reactive, ref } from "vue";
+	import { getUser } from "../router/auth.service";
+	import { getPermsSafe } from "../services/permissions";
+
+	const user = computed(() => getUser());
+	const perms = computed(() => getPermsSafe(user.value));
+	const canEdit = computed(() => perms.value?.canEditProductos === true || perms.value?.canEditAll === true);
 
 	const API_BASE = "https://localhost:7198";
 	const PRODUCTS_ENDPOINT = `${API_BASE}/api/Productos`;
@@ -272,8 +284,7 @@
 	const form = reactive(emptyForm());
 
 	onMounted(async () => {
-		await loadProducts();
-		await Promise.all([loadCategorias(), loadProveedores()]);
+		await Promise.all([loadProducts(), loadCategorias(), loadProveedores()]);
 	});
 
 	function normalizeList(data) {
@@ -285,6 +296,33 @@
 		if (Array.isArray(data?.value)) return data.value;
 		if (Array.isArray(data?.results)) return data.results;
 		return [];
+	}
+
+	function normalizeProducto(p) {
+		const idProducto = p?.idProducto ?? p?.IdProducto ?? p?.id ?? p?.Id ?? null;
+		const codigo = p?.codigo ?? p?.Codigo ?? "";
+		const nombre = p?.nombre ?? p?.Nombre ?? "";
+		const descripcion = p?.descripcion ?? p?.Descripcion ?? "";
+		const idCategoria = p?.idCategoria ?? p?.IdCategoria ?? p?.categoriaId ?? p?.CategoriaId ?? 0;
+		const idProveedor = p?.idProveedor ?? p?.IdProveedor ?? p?.proveedorId ?? p?.ProveedorId ?? 0;
+		const precioCompra = p?.precioCompra ?? p?.PrecioCompra ?? 0;
+		const precioVenta = p?.precioVenta ?? p?.PrecioVenta ?? 0;
+		const stockActual = p?.stockActual ?? p?.StockActual ?? 0;
+		const stockMinimo = p?.stockMinimo ?? p?.StockMinimo ?? 0;
+
+		return {
+			...p,
+			idProducto: idProducto != null ? Number(idProducto) : null,
+			codigo: String(codigo ?? "").trim(),
+			nombre: String(nombre ?? "").trim(),
+			descripcion: String(descripcion ?? "").trim(),
+			idCategoria: Number(idCategoria ?? 0),
+			idProveedor: Number(idProveedor ?? 0),
+			precioCompra: Number(precioCompra ?? 0),
+			precioVenta: Number(precioVenta ?? 0),
+			stockActual: Number(stockActual ?? 0),
+			stockMinimo: Number(stockMinimo ?? 0),
+		};
 	}
 
 	function normalizeCategoria(x) {
@@ -339,7 +377,7 @@
 			if (!res.ok) throw new Error(`GET /api/Productos falló (${res.status})`);
 
 			const data = await res.json();
-			rows.value = normalizeList(data);
+			rows.value = normalizeList(data).map(normalizeProducto);
 		} catch (e) {
 			rows.value = [];
 			apiError.value = e?.message ?? "No se pudo cargar productos desde la API.";
@@ -390,13 +428,7 @@
 
 		try {
 			const { list } = await fetchFirstList(CATEGORIAS_ENDPOINTS);
-			categorias.value = list
-				.map(normalizeCategoria)
-				.filter((x) => x.idCategoria != null && x.nombre);
-
-			if (categorias.value.length && Number(form.idCategoria) <= 0) {
-				form.idCategoria = Number(categorias.value[0].idCategoria);
-			}
+			categorias.value = list.map(normalizeCategoria).filter((x) => x.idCategoria != null && x.nombre);
 		} catch (e) {
 			categorias.value = [];
 			categoriasError.value = e?.message ?? "No se pudieron cargar categorías.";
@@ -412,13 +444,7 @@
 
 		try {
 			const { list } = await fetchFirstList(PROVEEDORES_ENDPOINTS);
-			proveedores.value = list
-				.map(normalizeProveedor)
-				.filter((x) => x.idProveedor != null && x.nombreEmpresa);
-
-			if (proveedores.value.length && Number(form.idProveedor) <= 0) {
-				form.idProveedor = Number(proveedores.value[0].idProveedor);
-			}
+			proveedores.value = list.map(normalizeProveedor).filter((x) => x.idProveedor != null && x.nombreEmpresa);
 		} catch (e) {
 			proveedores.value = [];
 			proveedoresError.value = e?.message ?? "No se pudieron cargar proveedores.";
@@ -428,7 +454,7 @@
 	}
 
 	function rowKey(p) {
-		return String(p?.idProducto ?? p?.codigo ?? Math.random());
+		return String(p?.idProducto ?? p?.codigo ?? `${p?.nombre}-${Math.random()}`);
 	}
 
 	function categoriaNombre(p) {
@@ -494,6 +520,8 @@
 	}
 
 	async function openCreate() {
+		if (!canEdit.value) return;
+
 		apiError.value = "";
 		mode.value = "create";
 		editingIdProducto.value = null;
@@ -501,7 +529,6 @@
 		Object.assign(form, emptyForm());
 
 		await ensureCombosLoaded();
-
 		if (categorias.value.length) form.idCategoria = Number(categorias.value[0].idCategoria);
 		if (proveedores.value.length) form.idProveedor = Number(proveedores.value[0].idProveedor);
 
@@ -509,26 +536,28 @@
 	}
 
 	async function openEdit(p) {
+		if (!canEdit.value) return;
+
 		apiError.value = "";
 
 		const id = p?.idProducto ?? null;
 		if (!id) {
-			apiError.value = "Este registro no tiene idProducto. Si lo ves, viene de datos no persistidos.";
+			apiError.value = "Este registro no tiene idProducto.";
 			return;
 		}
 
 		mode.value = "edit";
-		editingIdProducto.value = id;
+		editingIdProducto.value = Number(id);
 
 		await ensureCombosLoaded();
 
 		Object.assign(form, emptyForm(), {
-			idProducto: id,
+			idProducto: Number(id),
 			codigo: p.codigo ?? "",
 			nombre: p.nombre ?? "",
 			descripcion: p.descripcion ?? "",
-			idCategoria: Number(p.idCategoria ?? p.IdCategoria ?? 0),
-			idProveedor: Number(p.idProveedor ?? p.IdProveedor ?? 0),
+			idCategoria: Number(p.idCategoria ?? 0),
+			idProveedor: Number(p.idProveedor ?? 0),
 			precioCompra: Number(p.precioCompra ?? 0),
 			precioVenta: Number(p.precioVenta ?? 0),
 			stockActual: Number(p.stockActual ?? 0),
@@ -548,23 +577,23 @@
 		if (Number(form.idProveedor) <= 0) return "Debes seleccionar un Proveedor.";
 		if (Number(form.precioCompra) < 0 || Number(form.precioVenta) < 0) return "Los precios no pueden ser negativos.";
 		if (Number(form.stockActual) < 0 || Number(form.stockMinimo) < 0) return "El stock no puede ser negativo.";
+		if (Number(form.precioVenta) < Number(form.precioCompra)) return "El Precio de Venta no puede ser menor que el Precio de Compra.";
 		return "";
 	}
 
 	async function saveProduct() {
+		if (!canEdit.value) return;
+
 		apiError.value = "";
 		const err = validate();
-		if (err) {
-			apiError.value = err;
-			return;
-		}
+		if (err) { apiError.value = err; return; }
 
 		saving.value = true;
 		try {
 			const payload = {
-				codigo: form.codigo,
-				nombre: form.nombre,
-				descripcion: form.descripcion,
+				codigo: String(form.codigo ?? "").trim(),
+				nombre: String(form.nombre ?? "").trim(),
+				descripcion: String(form.descripcion ?? "").trim(),
 				idCategoria: Number(form.idCategoria),
 				idProveedor: Number(form.idProveedor),
 				precioCompra: Number(form.precioCompra),
@@ -584,11 +613,8 @@
 				let created = null;
 				try { created = await res.json(); } catch { created = null; }
 
-				if (!created || !created.idProducto) {
-					await loadProducts();
-				} else {
-					rows.value.unshift(created);
-				}
+				if (created) rows.value.unshift(normalizeProducto(created));
+				else await loadProducts();
 
 				closeModal();
 				return;
@@ -614,14 +640,10 @@
 			}
 
 			let updated = null;
-			try {
-				updated = await res.json();
-			} catch {
-				updated = { ...payload, idProducto: editingIdProducto.value };
-			}
+			try { updated = await res.json(); } catch { updated = { ...payload, idProducto: editingIdProducto.value }; }
 
 			const idx = rows.value.findIndex((r) => Number(r?.idProducto) === Number(editingIdProducto.value));
-			if (idx !== -1) rows.value[idx] = { ...rows.value[idx], ...updated, ...payload };
+			if (idx !== -1) rows.value[idx] = normalizeProducto({ ...rows.value[idx], ...updated, ...payload });
 
 			closeModal();
 		} catch (e) {
@@ -632,6 +654,8 @@
 	}
 
 	async function removeProduct(p) {
+		if (!canEdit.value) return;
+
 		const id = p?.idProducto ?? null;
 		const name = p?.nombre ?? p?.codigo ?? "este producto";
 

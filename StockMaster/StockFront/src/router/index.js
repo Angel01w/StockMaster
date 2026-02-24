@@ -31,7 +31,9 @@ const routes = [
             { path: "proveedores", name: "proveedores", component: Proveedores },
             { path: "inventario", name: "inventario", component: Inventario },
             { path: "reportes", name: "reportes", component: Reportes },
-            { path: "usuarios", name: "usuarios", component: Usuarios, meta: { requiresAdmin: true } },
+
+            // 👇 Admin Y Auditor pueden entrar (pero Auditor será solo lectura en la UI)
+            { path: "usuarios", name: "usuarios", component: Usuarios, meta: { requiresAdminOrAuditor: true } },
         ],
     },
 
@@ -59,16 +61,26 @@ function safeParseUser() {
     }
 }
 
+function normalizeRole(user) {
+    const raw = (user?.rol || user?.role || user?.roleLabel || "").toString().trim().toLowerCase();
+    if (!raw) return "";
+    if (raw.includes("admin")) return "admin";
+    if (raw.includes("audit")) return "auditor";
+    return "usuario";
+}
+
 router.beforeEach((to) => {
     const token = localStorage.getItem("sm_token");
     const user = safeParseUser();
+    const role = normalizeRole(user);
 
-    const roleRaw = (user?.rol || user?.role || "").toString().trim().toLowerCase();
-    const isAdmin = roleRaw === "admin" || roleRaw === "administrador" || roleRaw.includes("admin");
+    const isAdmin = role === "admin";
+    const isAuditor = role === "auditor";
 
     if (to.meta.requiresAuth && !token) return { name: "login" };
     if (to.meta.guestOnly && token) return { name: "dashboard" };
-    if (to.meta.requiresAdmin && !isAdmin) return { name: "dashboard" };
+
+    if (to.meta.requiresAdminOrAuditor && !(isAdmin || isAuditor)) return { name: "dashboard" };
 
     return true;
 });

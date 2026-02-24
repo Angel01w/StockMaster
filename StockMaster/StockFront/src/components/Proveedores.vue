@@ -12,7 +12,7 @@
 					<div class="h1">Gestión de Proveedores</div>
 				</div>
 
-				<button class="btn-primary" type="button" @click="openCreate">
+				<button v-if="canEdit" class="btn-primary" type="button" @click="openCreate">
 					<span class="plus">＋</span>
 					Nuevo Proveedor
 				</button>
@@ -54,12 +54,24 @@
 						</div>
 
 						<div class="actions">
-							<button class="icon-btn edit" type="button" title="Editar" aria-label="Editar" @click="openEdit(p)">
+							<button v-if="canEdit"
+									class="icon-btn edit"
+									type="button"
+									title="Editar"
+									aria-label="Editar"
+									@click="openEdit(p)">
 								✎
 							</button>
-							<button class="icon-btn del" type="button" title="Eliminar" aria-label="Eliminar" @click="removeProvider(p)">
+							<button v-if="canEdit"
+									class="icon-btn del"
+									type="button"
+									title="Eliminar"
+									aria-label="Eliminar"
+									@click="removeProvider(p)">
 								🗑
 							</button>
+
+							<span v-if="!canEdit" class="mutedBadge">Solo lectura</span>
 						</div>
 					</div>
 
@@ -83,13 +95,13 @@
 
 					<div class="card-foot">
 						<div class="foot-lbl">Productos Suministrados</div>
-						<div class="foot-num">{{ p.productosSuministrados ?? 0 }}</div>
+						<div class="foot-num">{{ Number(p.productosSuministrados ?? 0) }}</div>
 					</div>
 				</div>
 			</div>
 
 			<!-- DRAWER -->
-			<div v-if="isOpen" class="overlay" @click.self="closeModal">
+			<div v-if="isOpen && canEdit" class="overlay" @click.self="closeModal">
 				<div class="drawer" role="dialog" aria-modal="true">
 					<div class="drawer-head">
 						<div class="drawer-title">
@@ -104,36 +116,36 @@
 						<div class="grid2">
 							<div class="field">
 								<label>Nombre de la Empresa</label>
-								<input v-model.trim="form.nombreEmpresa" autocomplete="off" />
+								<input v-model.trim="form.nombreEmpresa" autocomplete="off" :disabled="!canEdit" />
 							</div>
 
 							<div class="field">
 								<label>Persona de Contacto</label>
-								<input v-model.trim="form.personaContacto" autocomplete="off" />
+								<input v-model.trim="form.personaContacto" autocomplete="off" :disabled="!canEdit" />
 							</div>
 						</div>
 
 						<div class="grid2">
 							<div class="field">
 								<label>Email</label>
-								<input v-model.trim="form.email" type="email" autocomplete="off" />
+								<input v-model.trim="form.email" type="email" autocomplete="off" :disabled="!canEdit" />
 							</div>
 
 							<div class="field">
 								<label>Teléfono</label>
-								<input v-model.trim="form.telefono" autocomplete="off" />
+								<input v-model.trim="form.telefono" autocomplete="off" :disabled="!canEdit" />
 							</div>
 						</div>
 
 						<div class="field">
 							<label>Dirección</label>
-							<textarea v-model.trim="form.direccion" rows="6"></textarea>
+							<textarea v-model.trim="form.direccion" rows="6" :disabled="!canEdit"></textarea>
 						</div>
 					</div>
 
 					<div class="drawer-foot">
 						<button class="btnLink" type="button" @click="closeModal">Cancelar</button>
-						<button class="btnPrimary" type="button" :disabled="saving" @click="saveProvider">
+						<button class="btnPrimary" type="button" :disabled="saving || !canEdit" @click="saveProvider">
 							{{ saving ? (mode === "create" ? "Creando..." : "Guardando...") : (mode === "create" ? "Crear Proveedor" : "Guardar Cambios") }}
 						</button>
 					</div>
@@ -146,11 +158,17 @@
 
 <script setup>
 	import { computed, onMounted, reactive, ref } from "vue";
+	import { getUser } from "../router/auth.service";
+	import { getPermsSafe } from "../services/permissions";
+
+	const user = computed(() => getUser());
+	const perms = computed(() => getPermsSafe(user.value));
+	const canEdit = computed(() => perms.value?.canEditProveedores === true || perms.value?.canEditAll === true);
 
 	// ✅ AJUSTA si tu backend corre en otro puerto / dominio
 	const API_BASE = "https://localhost:7198";
 
-	// ✅ Según tu Swagger (imagen): /api/Proveedores
+	// ✅ Según tu Swagger: /api/Proveedores
 	const PROVIDERS_ENDPOINT = `${API_BASE}/api/Proveedores`;
 
 	const searchQ = ref("");
@@ -178,24 +196,60 @@
 	onMounted(loadProviders);
 
 	function rowKey(p) {
-		return String(p?.idProveedor ?? p?.nombreEmpresa ?? Math.random());
+		return String(p?.idProveedor ?? p?.IdProveedor ?? p?.nombreEmpresa ?? `${Math.random()}`);
 	}
 
 	function normalizeProvider(p) {
+		const idProveedor = p?.idProveedor ?? p?.IdProveedor ?? p?.id ?? p?.Id ?? null;
+
+		const nombreEmpresa =
+			p?.nombreEmpresa ??
+			p?.NombreEmpresa ??
+			p?.nombre ??
+			p?.Nombre ??
+			p?.empresa ??
+			p?.Empresa ??
+			"";
+
+		const personaContacto =
+			p?.personaContacto ??
+			p?.PersonaContacto ??
+			p?.contacto ??
+			p?.Contacto ??
+			"";
+
+		const email = p?.email ?? p?.Email ?? "";
+		const telefono = p?.telefono ?? p?.Telefono ?? "";
+		const direccion = p?.direccion ?? p?.Direccion ?? "";
+
+		const productosSuministrados =
+			p?.productosSuministrados ??
+			p?.ProductosSuministrados ??
+			p?.totalProductos ??
+			p?.TotalProductos ??
+			0;
+
 		return {
-			idProveedor: p?.idProveedor ?? null,
-			nombreEmpresa: p?.nombreEmpresa ?? "",
-			personaContacto: p?.personaContacto ?? "",
-			email: p?.email ?? "",
-			telefono: p?.telefono ?? "",
-			direccion: p?.direccion ?? "",
-			productosSuministrados: p?.productosSuministrados ?? p?.totalProductos ?? 0,
+			...p,
+			idProveedor: idProveedor != null ? Number(idProveedor) : null,
+			nombreEmpresa: String(nombreEmpresa ?? "").trim(),
+			personaContacto: String(personaContacto ?? "").trim(),
+			email: String(email ?? "").trim(),
+			telefono: String(telefono ?? "").trim(),
+			direccion: String(direccion ?? "").trim(),
+			productosSuministrados: Number(productosSuministrados ?? 0),
 		};
 	}
 
 	function normalizeList(data) {
-		const list = Array.isArray(data) ? data : (data?.items ?? []);
-		return list.map(normalizeProvider);
+		if (Array.isArray(data)) return data.map(normalizeProvider);
+		if (Array.isArray(data?.$values)) return data.$values.map(normalizeProvider);
+		if (Array.isArray(data?.items)) return data.items.map(normalizeProvider);
+		if (Array.isArray(data?.data)) return data.data.map(normalizeProvider);
+		if (Array.isArray(data?.result)) return data.result.map(normalizeProvider);
+		if (Array.isArray(data?.value)) return data.value.map(normalizeProvider);
+		if (Array.isArray(data?.results)) return data.results.map(normalizeProvider);
+		return [];
 	}
 
 	async function readApiError(res) {
@@ -229,6 +283,11 @@
 			const res = await fetch(PROVIDERS_ENDPOINT);
 			if (!res.ok) throw await readApiError(res);
 
+			if (res.status === 204) {
+				providers.value = [];
+				return;
+			}
+
 			const data = await res.json();
 			providers.value = normalizeList(data);
 		} catch (e) {
@@ -256,6 +315,8 @@
 	});
 
 	function openCreate() {
+		if (!canEdit.value) return;
+
 		apiError.value = "";
 		mode.value = "create";
 		editingIdProveedor.value = null;
@@ -264,10 +325,12 @@
 	}
 
 	function openEdit(p) {
+		if (!canEdit.value) return;
+
 		apiError.value = "";
 		mode.value = "edit";
 
-		const id = p?.idProveedor ?? null;
+		const id = p?.idProveedor ?? p?.IdProveedor ?? null;
 		if (!id) {
 			apiError.value = "Este registro no tiene 'idProveedor'. La API debe devolver idProveedor para poder editar/eliminar.";
 			editingIdProveedor.value = null;
@@ -276,13 +339,13 @@
 			return;
 		}
 
-		editingIdProveedor.value = id;
+		editingIdProveedor.value = Number(id);
 		Object.assign(form, emptyForm(), {
-			nombreEmpresa: p?.nombreEmpresa ?? "",
-			personaContacto: p?.personaContacto ?? "",
-			email: p?.email ?? "",
-			telefono: p?.telefono ?? "",
-			direccion: p?.direccion ?? "",
+			nombreEmpresa: p?.nombreEmpresa ?? p?.NombreEmpresa ?? "",
+			personaContacto: p?.personaContacto ?? p?.PersonaContacto ?? "",
+			email: p?.email ?? p?.Email ?? "",
+			telefono: p?.telefono ?? p?.Telefono ?? "",
+			direccion: p?.direccion ?? p?.Direccion ?? "",
 		});
 		isOpen.value = true;
 	}
@@ -299,6 +362,8 @@
 	}
 
 	async function saveProvider() {
+		if (!canEdit.value) return;
+
 		apiError.value = "";
 		const err = validate();
 		if (err) { apiError.value = err; return; }
@@ -306,11 +371,11 @@
 		saving.value = true;
 		try {
 			const payload = {
-				nombreEmpresa: form.nombreEmpresa,
-				personaContacto: form.personaContacto,
-				email: form.email,
-				telefono: form.telefono,
-				direccion: form.direccion,
+				nombreEmpresa: String(form.nombreEmpresa ?? "").trim(),
+				personaContacto: String(form.personaContacto ?? "").trim(),
+				email: String(form.email ?? "").trim(),
+				telefono: String(form.telefono ?? "").trim(),
+				direccion: String(form.direccion ?? "").trim(),
 			};
 
 			// CREATE
@@ -323,15 +388,10 @@
 				if (!res.ok) throw await readApiError(res);
 
 				let created = null;
-				try { created = await res.json(); } catch { created = payload; }
+				try { created = await res.json(); } catch { created = null; }
 
-				// Si la API devuelve el registro (con idProveedor), lo agregamos
-				// Si devuelve vacío, recargamos desde la API
-				if (created && (created.idProveedor || created.nombreEmpresa)) {
-					providers.value.unshift(normalizeProvider(created));
-				} else {
-					await loadProviders();
-				}
+				if (created) providers.value.unshift(normalizeProvider(created));
+				else await loadProviders();
 
 				closeModal();
 				return;
@@ -363,7 +423,7 @@
 
 			if (updated) {
 				const idx = providers.value.findIndex((x) => Number(x?.idProveedor) === Number(editingIdProveedor.value));
-				if (idx !== -1) providers.value[idx] = { ...providers.value[idx], ...normalizeProvider(updated) };
+				if (idx !== -1) providers.value[idx] = normalizeProvider({ ...providers.value[idx], ...updated, ...payload });
 			} else {
 				await loadProviders();
 			}
@@ -377,8 +437,10 @@
 	}
 
 	async function removeProvider(p) {
-		const id = p?.idProveedor ?? null;
-		const name = p?.nombreEmpresa ?? "este proveedor";
+		if (!canEdit.value) return;
+
+		const id = p?.idProveedor ?? p?.IdProveedor ?? null;
+		const name = p?.nombreEmpresa ?? p?.NombreEmpresa ?? "este proveedor";
 
 		if (!id) {
 			alert("Este registro no tiene 'idProveedor'. DELETE requiere /api/Proveedores/{id}.");
@@ -392,7 +454,6 @@
 			const res = await fetch(url, { method: "DELETE" });
 			if (!res.ok) throw await readApiError(res);
 
-			// Si devuelve 204, quitamos localmente
 			providers.value = providers.value.filter((x) => Number(x?.idProveedor) !== Number(id));
 		} catch (e) {
 			alert(e?.message ?? "No se pudo eliminar.");
@@ -401,7 +462,7 @@
 </script>
 
 <style scoped>
-	/* tu mismo CSS, solo agregué .mutedLine */
+	/* tu mismo CSS, solo agregué .mutedBadge */
 	.page {
 		min-height: 100vh;
 		background: #eef3ff;
@@ -509,6 +570,19 @@
 		padding: 10px 2px;
 	}
 
+	.mutedBadge {
+		display: inline-flex;
+		align-items: center;
+		height: 30px;
+		padding: 0 10px;
+		border-radius: 999px;
+		font-weight: 900;
+		font-size: 12px;
+		color: #64748b;
+		background: rgba(148,163,184,.16);
+		border: 1px solid rgba(148,163,184,.22);
+	}
+
 	.grid {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -548,6 +622,7 @@
 	.actions {
 		display: flex;
 		gap: 10px;
+		align-items: center;
 	}
 
 	.icon-btn {

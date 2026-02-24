@@ -12,7 +12,7 @@
 					<div class="h1">Gestión de Usuarios</div>
 				</div>
 
-				<button class="btn-primary" type="button" @click="openCreate">
+				<button v-if="canEdit" class="btn-primary" type="button" @click="openCreate">
 					<span class="plus">＋</span>
 					Nuevo Usuario
 				</button>
@@ -84,7 +84,11 @@
 							<span class="sDot" :class="isActive(u) ? 'on' : 'off'"></span>
 							<span class="muted2">{{ isActive(u) ? "Activo" : "Inactivo" }}</span>
 
-							<button class="miniBtn" type="button" @click="toggleEstado(u)" :disabled="rowBusyId === (u?.idUsuario ?? null)">
+							<button class="miniBtn"
+									type="button"
+									@click="toggleEstado(u)"
+									:disabled="!canEdit || rowBusyId === (u?.idUsuario ?? null)"
+									:title="!canEdit ? 'Solo lectura' : ''">
 								{{ isActive(u) ? "Desactivar" : "Activar" }}
 							</button>
 						</div>
@@ -92,9 +96,15 @@
 						<div class="muted">{{ lastAccess(u) }}</div>
 
 						<div class="actions">
-							<button class="icon-btn edit" type="button" title="Editar" aria-label="Editar" @click="openEdit(u)">✎</button>
-							<button class="icon-btn key" type="button" title="Cambiar password" aria-label="Cambiar password" @click="openPassword(u)">🔑</button>
-							<button class="icon-btn del" type="button" title="Eliminar" aria-label="Eliminar" @click="removeUser(u)">🗑</button>
+							<template v-if="canEdit">
+								<button class="icon-btn edit" type="button" title="Editar" aria-label="Editar" @click="openEdit(u)">✎</button>
+								<button class="icon-btn key" type="button" title="Cambiar password" aria-label="Cambiar password" @click="openPassword(u)">🔑</button>
+								<button class="icon-btn del" type="button" title="Eliminar" aria-label="Eliminar" @click="removeUser(u)">🗑</button>
+							</template>
+
+							<template v-else>
+								<span class="mutedReadOnly">Solo lectura</span>
+							</template>
 						</div>
 					</div>
 
@@ -221,6 +231,10 @@
 
 <script setup>
 	import { computed, onMounted, reactive, ref } from "vue";
+	import { getPermsSafe } from "../router/auth.service";
+
+	const perms = computed(() => getPermsSafe());
+	const canEdit = computed(() => perms.value?.canEditAll === true);
 
 	const API_BASE = "https://localhost:7198";
 	const USERS_ENDPOINT = `${API_BASE}/api/Usuarios`;
@@ -526,6 +540,8 @@
 	);
 
 	function openCreate() {
+		if (!canEdit.value) return;
+
 		apiError.value = "";
 		mode.value = "create";
 		editingId.value = null;
@@ -538,6 +554,8 @@
 	}
 
 	function openEdit(u) {
+		if (!canEdit.value) return;
+
 		apiError.value = "";
 		mode.value = "edit";
 
@@ -649,6 +667,8 @@
 	}
 
 	async function saveUser() {
+		if (!canEdit.value) return;
+
 		apiError.value = "";
 		const err = validate();
 		if (err) {
@@ -724,6 +744,8 @@
 	}
 
 	async function removeUser(u) {
+		if (!canEdit.value) return;
+
 		const id = u?.idUsuario ?? null;
 		const name = displayName(u);
 
@@ -744,6 +766,8 @@
 	}
 
 	async function toggleEstado(u) {
+		if (!canEdit.value) return;
+
 		const id = u?.idUsuario ?? null;
 		if (!id) return;
 
@@ -781,6 +805,8 @@
 	}
 
 	function openPassword(u) {
+		if (!canEdit.value) return;
+
 		pwdError.value = "";
 		pwdSaving.value = false;
 
@@ -814,6 +840,8 @@
 	}
 
 	async function savePassword() {
+		if (!canEdit.value) return;
+
 		pwdError.value = "";
 		const err = validatePwd();
 		if (err) {
@@ -914,6 +942,16 @@
 		display: inline-grid;
 		place-items: center;
 		font-weight: 900;
+	}
+
+	.mutedReadOnly {
+		color: #64748b;
+		font-weight: 900;
+		font-size: 12px;
+		padding: 6px 10px;
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.04);
+		border: 1px solid rgba(15, 23, 42, 0.06);
 	}
 
 	.search {
@@ -1197,6 +1235,11 @@
 		cursor: pointer;
 		color: #334155;
 	}
+
+		.miniBtn:disabled {
+			opacity: 0.55;
+			cursor: not-allowed;
+		}
 
 	.tfoot {
 		display: flex;

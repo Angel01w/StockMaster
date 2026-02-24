@@ -13,7 +13,7 @@
 					<div class="h1">Control de Inventario</div>
 				</div>
 
-				<button class="btn-primary" type="button" @click="openCreate">
+				<button v-if="canEdit" class="btn-primary" type="button" @click="openCreate">
 					<span class="plus">＋</span>
 					Registrar Movimiento
 				</button>
@@ -134,7 +134,7 @@
 				</div>
 			</div>
 
-			<div v-if="isOpen" class="modalOverlay" @click.self="closeModal">
+			<div v-if="isOpen && canEdit" class="modalOverlay" @click.self="closeModal">
 				<div class="modal" role="dialog" aria-modal="true">
 					<div class="modalHead">
 						<div class="modalTitle">Registrar Movimiento</div>
@@ -147,16 +147,12 @@
 						<div class="grid2">
 							<div class="field">
 								<label>Fecha</label>
-								<input type="date" v-model="form.fecha" />
+								<input type="date" v-model="form.fecha" :disabled="!canEdit" />
 							</div>
 
 							<div class="field">
 								<label>Tipo de Movimiento</label>
-								<!-- ✅ Cambia automáticamente según el Motivo:
-								- Entrada => fija Entrada y bloquea
-								- Salida => fija Salida y bloquea
-								- Ambos  => permite elegir -->
-								<select v-model="form.tipo" :disabled="tipoBloqueado">
+								<select v-model="form.tipo" :disabled="tipoBloqueado || !canEdit">
 									<option value="Entrada">Entrada</option>
 									<option value="Salida">Salida</option>
 								</select>
@@ -168,7 +164,7 @@
 
 						<div class="field">
 							<label>Producto</label>
-							<select v-model.number="form.idProducto" :disabled="productosLoading">
+							<select v-model.number="form.idProducto" :disabled="productosLoading || !canEdit">
 								<option :value="null" disabled>
 									{{ productosLoading ? "Cargando productos..." : "Seleccione un producto" }}
 								</option>
@@ -186,18 +182,18 @@
 						<div class="grid2">
 							<div class="field">
 								<label>Cantidad</label>
-								<input type="number" min="0" step="1" v-model.number="form.cantidad" />
+								<input type="number" min="0" step="1" v-model.number="form.cantidad" :disabled="!canEdit" />
 							</div>
 
 							<div class="field">
 								<label>Documento (Opcional)</label>
-								<input v-model.trim="form.documento" placeholder="Ej: FAC-2024-001" autocomplete="off" />
+								<input v-model.trim="form.documento" placeholder="Ej: FAC-2024-001" autocomplete="off" :disabled="!canEdit" />
 							</div>
 						</div>
 
 						<div class="field">
 							<label>Motivo</label>
-							<select v-model.number="form.idMotivo" :disabled="motivosLoading">
+							<select v-model.number="form.idMotivo" :disabled="motivosLoading || !canEdit">
 								<option :value="null" disabled>
 									{{ motivosLoading ? "Cargando motivos..." : "Seleccione un motivo" }}
 								</option>
@@ -214,7 +210,7 @@
 
 						<div class="field">
 							<label>Usuario</label>
-							<select v-model.number="form.idUsuario" :disabled="usuariosLoading">
+							<select v-model.number="form.idUsuario" :disabled="usuariosLoading || !canEdit">
 								<option :value="null" disabled>
 									{{ usuariosLoading ? "Cargando usuarios..." : "Seleccione un usuario" }}
 								</option>
@@ -233,7 +229,7 @@
 					<div class="modalFoot">
 						<button class="btnLink" type="button" @click="closeModal">Cancelar</button>
 
-						<button class="btnPrimary" type="button" :disabled="saving || motivosLoading || productosLoading || usuariosLoading" @click="createMovement">
+						<button class="btnPrimary" type="button" :disabled="saving || motivosLoading || productosLoading || usuariosLoading || !canEdit" @click="createMovement">
 							{{ saving ? "Registrando..." : "Registrar Movimiento" }}
 						</button>
 					</div>
@@ -246,6 +242,12 @@
 
 <script setup>
 	import { computed, onMounted, reactive, ref, watch } from "vue";
+	import { getUser } from "../router/auth.service";
+	import { getPermsSafe } from "../services/permissions";
+
+	const user = computed(() => getUser());
+	const perms = computed(() => getPermsSafe(user.value));
+	const canEdit = computed(() => perms.value?.canEditInventario === true || perms.value?.canEditAll === true);
 
 	const API_BASE = "https://localhost:7198";
 	const MOV_ENDPOINT = `${API_BASE}/api/Movimientos`;
@@ -303,12 +305,6 @@
 	});
 	const form = reactive(emptyForm());
 
-	// =========================
-	// ✅ NUEVO: Tipo depende del Motivo (TipoAplica)
-	// - Entrada => fija "Entrada" y bloquea select
-	// - Salida  => fija "Salida" y bloquea select
-	// - Ambos   => deja elegir
-	// =========================
 	const motivoSeleccionado = computed(() => {
 		const id = Number(form.idMotivo);
 		if (!id) return null;
@@ -317,7 +313,7 @@
 
 	const tipoAplicaNorm = computed(() => {
 		const v = motivoSeleccionado.value?.tipoAplica;
-		return String(v ?? "").trim().toLowerCase(); // "entrada" | "salida" | "ambos" | ""
+		return String(v ?? "").trim().toLowerCase();
 	});
 
 	const tipoBloqueado = computed(() => {
@@ -328,7 +324,6 @@
 		const t = tipoAplicaNorm.value;
 		if (t === "entrada") form.tipo = "Entrada";
 		else if (t === "salida") form.tipo = "Salida";
-		// ambos => no forzamos
 	}
 
 	watch(
@@ -348,7 +343,6 @@
 		try {
 			await Promise.all([loadProductos(), loadMotivos(), loadUsuarios()]);
 			await loadMovimientos();
-			// por si el primer motivo ya viene seteado
 			syncTipoConMotivo();
 		} catch (e) {
 			loadError.value = e?.message ?? "Error cargando inventario.";
@@ -386,7 +380,7 @@
 			...m,
 			idMotivo: idMotivo != null ? Number(idMotivo) : null,
 			nombre: String(nombre ?? "").trim(),
-			tipoAplica, // ← aquí viene "Entrada" | "Salida" | "Ambos"
+			tipoAplica,
 		};
 	}
 
@@ -570,7 +564,6 @@
 				form.idMotivo = Number(motivos.value[0].idMotivo);
 			}
 
-			// ✅ si setea el primer motivo, sincroniza el tipo
 			syncTipoConMotivo();
 		} catch (e) {
 			motivos.value = [];
@@ -637,13 +630,13 @@
 	}
 
 	function openCreate() {
+		if (!canEdit.value) return;
 		apiError.value = "";
 		Object.assign(form, emptyForm(), {
 			idProducto: productos.value?.[0]?.idProducto ?? null,
 			idMotivo: motivos.value?.[0]?.idMotivo ?? null,
 			idUsuario: usuarios.value?.[0]?.idUsuario ?? null,
 		});
-		// ✅ sincroniza tipo según el motivo precargado
 		syncTipoConMotivo();
 		isOpen.value = true;
 	}
@@ -663,6 +656,7 @@
 	}
 
 	async function createMovement() {
+		if (!canEdit.value) return;
 		apiError.value = "";
 		const err = validate();
 		if (err) { apiError.value = err; return; }
@@ -736,7 +730,6 @@
 		font-size: 12px;
 	}
 
-	/* ✅ NUEVO: hint para el select bloqueado */
 	.miniHint {
 		margin-top: 8px;
 		color: #475569;

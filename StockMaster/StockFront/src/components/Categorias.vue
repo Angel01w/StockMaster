@@ -1,11 +1,9 @@
 ﻿<template>
 	<div class="page">
 		<div class="content">
-			<!-- Header -->
 			<div class="hdr">
 				<div class="hdr-left">
 					<div class="cube">
-						<!-- tag icon -->
 						<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
 							<path d="M20 13.5V7a2 2 0 0 0-2-2h-6.5a2 2 0 0 0-1.4.6L4.6 11.1a2 2 0 0 0 0 2.8l5.5 5.5a2 2 0 0 0 2.8 0l5.5-5.5a2 2 0 0 0 .6-1.4Z"
 								  stroke="currentColor"
@@ -19,26 +17,22 @@
 					</div>
 				</div>
 
-				<button class="btn-primary" type="button" @click="openCreate">
+				<button v-if="canEdit" class="btn-primary" type="button" @click="openCreate">
 					<span class="plus">＋</span>
 					Nueva Categoría
 				</button>
 			</div>
 
-			<!-- Search -->
 			<div class="search">
 				<div class="search-ic">🔍</div>
 				<input v-model="search" class="search-in" placeholder="Buscar categorías..." />
 			</div>
 
-			<!-- ✅ error si API falla -->
 			<div v-if="apiError && !isOpen" class="alert" style="margin-bottom: 16px">
 				{{ apiError }}
 			</div>
 
-			<!-- Grid -->
 			<div class="grid">
-				<!-- ✅ empty state -->
 				<div v-if="!loading && filteredRows.length === 0" class="empty">
 					No hay categorías. Crea una con “Nueva Categoría”.
 				</div>
@@ -55,7 +49,7 @@
 							</svg>
 						</div>
 
-						<div class="card-actions">
+						<div class="card-actions" v-if="canEdit">
 							<button class="aicon edit" type="button" title="Editar" aria-label="Editar" @click="openEdit(c)">✎</button>
 							<button class="aicon del" type="button" title="Eliminar" aria-label="Eliminar" @click="removeCategory(c)">🗑</button>
 						</div>
@@ -67,7 +61,6 @@
 					<div class="card-foot">
 						<div class="foot-lbl">Productos</div>
 
-						<!-- ✅ ahora se calcula de verdad desde /api/Productos -->
 						<div class="foot-num">
 							{{ productosCount(c) }}
 						</div>
@@ -75,7 +68,6 @@
 				</div>
 			</div>
 
-			<!-- Drawer / Side Modal -->
 			<div v-if="isOpen" class="drawerOverlay" @click.self="closeModal">
 				<div class="drawer" role="dialog" aria-modal="true">
 					<div class="drawerHead">
@@ -90,19 +82,19 @@
 
 						<div class="field">
 							<label>Nombre</label>
-							<input v-model.trim="form.nombre" autocomplete="off" />
+							<input v-model.trim="form.nombre" autocomplete="off" :disabled="!canEdit" />
 						</div>
 
 						<div class="field">
 							<label>Descripción</label>
-							<textarea v-model.trim="form.descripcion" rows="10"></textarea>
+							<textarea v-model.trim="form.descripcion" rows="10" :disabled="!canEdit"></textarea>
 						</div>
 					</div>
 
 					<div class="drawerFoot">
 						<button class="btnLink" type="button" @click="closeModal">Cancelar</button>
 
-						<button class="btnPrimary" type="button" :disabled="saving" @click="saveCategory">
+						<button v-if="canEdit" class="btnPrimary" type="button" :disabled="saving" @click="saveCategory">
 							{{
 								saving
 									? mode === "create"
@@ -116,25 +108,19 @@
 					</div>
 				</div>
 			</div>
-			<!-- /Drawer -->
 		</div>
 	</div>
 </template>
 
 <script setup>
 	import { computed, onMounted, reactive, ref } from "vue";
+	import { getUser } from "../router/auth.service";
+	import { getPermsSafe } from "../services/permissions";
 
-	/**
-	 * Swagger:
-	 * - GET    /api/Categorias
-	 * - POST   /api/Categorias
-	 * - GET    /api/Categorias/{id}
-	 * - PUT    /api/Categorias/{id}
-	 * - DELETE /api/Categorias/{id}
-	 *
-	 * Productos:
-	 * - GET /api/Productos  (para contar por categoría)
-	 */
+	const user = computed(() => getUser());
+	const perms = computed(() => getPermsSafe(user.value));
+	const canEdit = computed(() => perms.value?.canEditCatalogos === true || perms.value?.canEditAll === true);
+
 	const API_BASE = "https://localhost:7198";
 	const CATEGORIES_ENDPOINT = `${API_BASE}/api/Categorias`;
 	const PRODUCTS_ENDPOINT = `${API_BASE}/api/Productos`;
@@ -145,12 +131,11 @@
 	const loading = ref(false);
 	const apiError = ref("");
 
-	const mode = ref("create"); // "create" | "edit"
-	const editingIdCategoria = ref(null); // idCategoria real
+	const mode = ref("create");
+	const editingIdCategoria = ref(null);
 
 	const rows = ref([]);
 
-	// ✅ lista de productos para poder contar
 	const productos = ref([]);
 	const productosLoading = ref(false);
 	const productosError = ref("");
@@ -166,12 +151,9 @@
 		await loadAll();
 	});
 
-	/** =======================
-	 * NORMALIZERS
-	 * ======================= */
 	function normalizeList(data) {
 		if (Array.isArray(data)) return data;
-		if (Array.isArray(data?.$values)) return data.$values; // .NET sometimes
+		if (Array.isArray(data?.$values)) return data.$values;
 		if (Array.isArray(data?.items)) return data.items;
 		if (Array.isArray(data?.data)) return data.data;
 		if (Array.isArray(data?.result)) return data.result;
@@ -181,7 +163,6 @@
 	}
 
 	function normalizeCategoria(c) {
-		// soporta idCategoria / id / IdCategoria / categoriaId etc.
 		const idCategoria =
 			c?.idCategoria ??
 			c?.IdCategoria ??
@@ -200,7 +181,6 @@
 	}
 
 	function normalizeProducto(p) {
-		// clave: dónde viene la categoría del producto
 		const idCategoria =
 			p?.idCategoria ??
 			p?.IdCategoria ??
@@ -208,7 +188,6 @@
 			p?.CategoriaId ??
 			p?.idCategoriaFk ??
 			p?.IdCategoriaFk ??
-			// o a veces viene anidada: { categoria: { idCategoria: 1 } }
 			p?.categoria?.idCategoria ??
 			p?.categoria?.IdCategoria ??
 			p?.Categoria?.idCategoria ??
@@ -221,14 +200,10 @@
 		};
 	}
 
-	/** =======================
-	 * LOADERS
-	 * ======================= */
 	async function loadAll() {
 		loading.value = true;
 		apiError.value = "";
 		try {
-			// cargamos ambos en paralelo: categorias + productos
 			await Promise.all([loadCategories(), loadProductos()]);
 		} catch (e) {
 			apiError.value = e?.message ?? "Error cargando datos desde la API.";
@@ -263,21 +238,16 @@
 			productos.value = list.map(normalizeProducto);
 		} catch (e) {
 			productos.value = [];
-			// no rompas toda la pantalla si productos falla: muestra error y cuenta = 0
 			productosError.value = e?.message ?? "No se pudieron cargar productos.";
 		} finally {
 			productosLoading.value = false;
 		}
 	}
 
-	/** =======================
-	 * HELPERS
-	 * ======================= */
 	function rowKey(c) {
 		return String(c?.idCategoria ?? c?.nombre ?? Math.random());
 	}
 
-	// ✅ Mapa { idCategoria -> cantidad }
 	const productosCountMap = computed(() => {
 		const map = new Map();
 		for (const p of productos.value) {
@@ -288,16 +258,9 @@
 		return map;
 	});
 
-	/**
-	 * ✅ Ahora el contador es real.
-	 * - Si el API ya trae productosCount/totalProductos, lo usa.
-	 * - Si no, calcula por /api/Productos.
-	 */
 	function productosCount(c) {
 		if (typeof c?.productosCount === "number") return c.productosCount;
 		if (typeof c?.totalProductos === "number") return c.totalProductos;
-
-		// por si el backend manda array anidado
 		if (Array.isArray(c?.productos)) return c.productos.length;
 
 		const id = c?.idCategoria != null ? Number(c.idCategoria) : null;
@@ -318,10 +281,8 @@
 		});
 	});
 
-	/** =======================
-	 * UI ACTIONS
-	 * ======================= */
 	function openCreate() {
+		if (!canEdit.value) return;
 		apiError.value = "";
 		mode.value = "create";
 		editingIdCategoria.value = null;
@@ -330,6 +291,7 @@
 	}
 
 	function openEdit(c) {
+		if (!canEdit.value) return;
 		apiError.value = "";
 		const id = c?.idCategoria ?? null;
 		if (!id) {
@@ -373,6 +335,7 @@
 	}
 
 	async function saveCategory() {
+		if (!canEdit.value) return;
 		apiError.value = "";
 		const err = validate();
 		if (err) {
@@ -387,7 +350,6 @@
 				descripcion: form.descripcion,
 			};
 
-			// CREATE
 			if (mode.value === "create") {
 				const res = await fetch(CATEGORIES_ENDPOINT, {
 					method: "POST",
@@ -413,7 +375,6 @@
 				return;
 			}
 
-			// EDIT
 			if (!editingIdCategoria.value) {
 				apiError.value = "No hay idCategoria para editar.";
 				return;
@@ -452,6 +413,7 @@
 	}
 
 	async function removeCategory(c) {
+		if (!canEdit.value) return;
 		const id = c?.idCategoria ?? null;
 		const name = c?.nombre ?? "esta categoría";
 
@@ -468,9 +430,6 @@
 			if (!res.ok) throw await readApiError(res);
 
 			rows.value = rows.value.filter((r) => Number(r?.idCategoria) !== Number(id));
-
-			// ✅ opcional: recargar productos (por si backend también eliminó productos o cambió relaciones)
-			// await loadProductos();
 		} catch (e) {
 			alert(e?.message ?? "No se pudo eliminar.");
 		}
@@ -487,7 +446,6 @@
 		padding: 22px;
 	}
 
-	/* header */
 	.hdr {
 		display: flex;
 		align-items: center;
@@ -546,7 +504,6 @@
 		font-weight: 900;
 	}
 
-	/* search */
 	.search {
 		height: 44px;
 		display: flex;
@@ -573,7 +530,6 @@
 		color: #0f172a;
 	}
 
-	/* cards grid */
 	.grid {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -588,7 +544,6 @@
 		font-weight: 800;
 	}
 
-	/* category card */
 	.cat-card {
 		background: rgba(255, 255, 255, 0.92);
 		border: 1px solid rgba(15, 23, 42, 0.08);
@@ -685,7 +640,6 @@
 		font-size: 14px;
 	}
 
-	/* drawer */
 	.drawerOverlay {
 		position: fixed;
 		inset: 0;
