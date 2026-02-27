@@ -1,55 +1,31 @@
 ﻿using System;
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
+using System.Collections.Generic;
 
-namespace StockMaster.Domain.Entities
+namespace StockMaster.Domain.Entities;
+
+public class Producto
 {
-    [Table("Productos")]
-    public class Producto
-    {
-        [Key]
-        public int IdProducto { get; set; }
+    public int IdProducto { get; set; }
+    public string Codigo { get; set; } = "";
+    public string Nombre { get; set; } = "";
+    public string? Descripcion { get; set; }
 
-        [Required]
-        [MaxLength(40)]
-        public string Codigo { get; set; } = string.Empty;
+    public int IdCategoria { get; set; }
+    public Categoria? Categoria { get; set; }
 
-        [Required]
-        [MaxLength(120)]
-        public string Nombre { get; set; } = string.Empty;
+    public int IdProveedor { get; set; }
+    public Proveedor? Proveedor { get; set; }
 
-        [MaxLength(255)]
-        public string? Descripcion { get; set; }
+    public decimal PrecioCompra { get; set; }
+    public decimal PrecioVenta { get; set; }
 
-        [Required]
-        public int IdCategoria { get; set; }
+    public int StockActual { get; set; }
+    public int StockMinimo { get; set; }
 
-        [Required]
-        public int IdProveedor { get; set; }
+    public int IdArea { get; set; }
 
-        [Required]
-        [Column(TypeName = "decimal(12,2)")]
-        public decimal PrecioCompra { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
 
-        [Required]
-        [Column(TypeName = "decimal(12,2)")]
-        public decimal PrecioVenta { get; set; }
-
-        [Required]
-        public int StockActual { get; set; }
-
-        [Required]
-        public int StockMinimo { get; set; }
-
-        [Required]
-        public int IdArea { get; set; }
-
-        [Required]
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-        public DateTime? UpdatedAt { get; set; }
-
-        public Categoria? Categoria { get; set; }
-        public Proveedor? Proveedor { get; set; }
-    }
+    public ICollection<MovimientoInventario> MovimientosInventario { get; set; } = new List<MovimientoInventario>();
 }

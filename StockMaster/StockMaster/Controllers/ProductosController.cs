@@ -3,7 +3,11 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StockMaster.Domain.Entities;
 using StockMaster.Infrastructure.Data;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
+using System.Threading.Tasks;
 
 namespace StockMaster.API.Controllers;
 
@@ -52,17 +56,19 @@ public class ProductosController : ControllerBase
         return id;
     }
 
-    private bool IsAuditor()
+    private string GetRole()
     {
-        var role =
+        return
             User.FindFirst(ClaimTypes.Role)?.Value ??
             User.FindFirst("role")?.Value ??
-            User.FindFirst("Rol")?.Value;
-
-        return string.Equals(role, "Auditor", StringComparison.OrdinalIgnoreCase);
+            User.FindFirst("Rol")?.Value ??
+            "";
     }
 
-    private async Task<int> ResolveAreaIdAsync()
+    private bool IsAdmin() => string.Equals(GetRole(), "Admin", StringComparison.OrdinalIgnoreCase);
+    private bool IsAuditor() => string.Equals(GetRole(), "Auditor", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<int?> ResolveAreaIdOrNullAsync()
     {
         var raw =
             User.FindFirst("IdArea")?.Value ??
@@ -91,32 +97,40 @@ public class ProductosController : ControllerBase
         if (areaFromBridge.HasValue && areaFromBridge.Value > 0)
             return areaFromBridge.Value;
 
-        throw new InvalidOperationException("No se pudo resolver AreaId: no está en token ni en Usuarios.AreaId ni en UsuarioAreas.");
+        return null;
     }
 
     [HttpGet]
     public async Task<ActionResult<List<Producto>>> GetAll()
     {
-        var areaId = await ResolveAreaIdAsync();
+        var areaId = await ResolveAreaIdOrNullAsync();
 
-        var list = await _db.Productos
-            .AsNoTracking()
-            .Where(x => x.IdArea == areaId)
-            .OrderBy(x => x.Nombre)
-            .ToListAsync();
+        if (!areaId.HasValue && !IsAdmin())
+            return Unauthorized("Token sin IdArea/AreaId válido.");
 
+        var q = _db.Productos.AsNoTracking().AsQueryable();
+
+        if (areaId.HasValue)
+            q = q.Where(x => x.IdArea == areaId.Value);
+
+        var list = await q.OrderBy(x => x.Nombre).ToListAsync();
         return list;
     }
 
     [HttpGet("{id:int}")]
     public async Task<ActionResult<Producto>> GetById(int id)
     {
-        var areaId = await ResolveAreaIdAsync();
+        var areaId = await ResolveAreaIdOrNullAsync();
 
-        var item = await _db.Productos
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.IdProducto == id && x.IdArea == areaId);
+        if (!areaId.HasValue && !IsAdmin())
+            return Unauthorized("Token sin IdArea/AreaId válido.");
 
+        var q = _db.Productos.AsNoTracking().Where(x => x.IdProducto == id);
+
+        if (areaId.HasValue)
+            q = q.Where(x => x.IdArea == areaId.Value);
+
+        var item = await q.FirstOrDefaultAsync();
         if (item is null) return NotFound();
         return item;
     }
@@ -126,7 +140,10 @@ public class ProductosController : ControllerBase
     {
         if (IsAuditor()) return Forbid();
 
-        var areaId = await ResolveAreaIdAsync();
+        var areaId = await ResolveAreaIdOrNullAsync();
+
+        if (!areaId.HasValue && !IsAdmin())
+            return Unauthorized("Token sin IdArea/AreaId válido.");
 
         var codigo = (dto.Codigo ?? "").Trim();
         var nombre = (dto.Nombre ?? "").Trim();
@@ -134,8 +151,11 @@ public class ProductosController : ControllerBase
         if (string.IsNullOrWhiteSpace(codigo) || string.IsNullOrWhiteSpace(nombre))
             return BadRequest("Código y Nombre son obligatorios.");
 
-        var exists = await _db.Productos.AnyAsync(x => x.IdArea == areaId && x.Codigo == codigo);
-        if (exists) return BadRequest("Ya existe un producto con ese código en tu área.");
+        if (areaId.HasValue)
+        {
+            var exists = await _db.Productos.AnyAsync(x => x.IdArea == areaId.Value && x.Codigo == codigo);
+            if (exists) return BadRequest("Ya existe un producto con ese código en tu área.");
+        }
 
         var producto = new Producto
         {
@@ -148,7 +168,7 @@ public class ProductosController : ControllerBase
             PrecioVenta = dto.PrecioVenta,
             StockActual = dto.StockActual,
             StockMinimo = dto.StockMinimo,
-            IdArea = areaId,
+            IdArea = areaId ?? 0,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -163,11 +183,17 @@ public class ProductosController : ControllerBase
     {
         if (IsAuditor()) return Forbid();
 
-        var areaId = await ResolveAreaIdAsync();
+        var areaId = await ResolveAreaIdOrNullAsync();
 
-        var producto = await _db.Productos
-            .FirstOrDefaultAsync(x => x.IdProducto == id && x.IdArea == areaId);
+        if (!areaId.HasValue && !IsAdmin())
+            return Unauthorized("Token sin IdArea/AreaId válido.");
 
+        var q = _db.Productos.Where(x => x.IdProducto == id);
+
+        if (areaId.HasValue)
+            q = q.Where(x => x.IdArea == areaId.Value);
+
+        var producto = await q.FirstOrDefaultAsync();
         if (producto is null) return NotFound();
 
         var codigo = (dto.Codigo ?? "").Trim();
@@ -176,10 +202,13 @@ public class ProductosController : ControllerBase
         if (string.IsNullOrWhiteSpace(codigo) || string.IsNullOrWhiteSpace(nombre))
             return BadRequest("Código y Nombre son obligatorios.");
 
-        var dup = await _db.Productos.AnyAsync(x =>
-            x.IdArea == areaId && x.Codigo == codigo && x.IdProducto != id);
+        if (areaId.HasValue)
+        {
+            var dup = await _db.Productos.AnyAsync(x =>
+                x.IdArea == areaId.Value && x.Codigo == codigo && x.IdProducto != id);
 
-        if (dup) return BadRequest("Ya existe otro producto con ese código en tu área.");
+            if (dup) return BadRequest("Ya existe otro producto con ese código en tu área.");
+        }
 
         producto.Codigo = codigo;
         producto.Nombre = nombre;
@@ -201,11 +230,17 @@ public class ProductosController : ControllerBase
     {
         if (IsAuditor()) return Forbid();
 
-        var areaId = await ResolveAreaIdAsync();
+        var areaId = await ResolveAreaIdOrNullAsync();
 
-        var producto = await _db.Productos
-            .FirstOrDefaultAsync(x => x.IdProducto == id && x.IdArea == areaId);
+        if (!areaId.HasValue && !IsAdmin())
+            return Unauthorized("Token sin IdArea/AreaId válido.");
 
+        var q = _db.Productos.Where(x => x.IdProducto == id);
+
+        if (areaId.HasValue)
+            q = q.Where(x => x.IdArea == areaId.Value);
+
+        var producto = await q.FirstOrDefaultAsync();
         if (producto is null) return NotFound();
 
         _db.Productos.Remove(producto);

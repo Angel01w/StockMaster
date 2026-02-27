@@ -1,99 +1,65 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using StockMaster.Domain.Entities;
 
-namespace StockMaster.Infrastructure.Data
+namespace StockMaster.Infrastructure.Data;
+
+public class AppDbContext : DbContext
 {
-    public class AppDbContext : DbContext
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+
+    public DbSet<Usuario> Usuarios { get; set; }
+    public DbSet<Role> Roles { get; set; }
+    public DbSet<UsuarioArea> UsuarioAreas { get; set; }
+    public DbSet<Producto> Productos { get; set; }
+    public DbSet<MovimientoInventario> MovimientosInventario { get; set; }
+    public DbSet<Categoria> Categorias { get; set; }
+    public DbSet<Proveedor> Proveedores { get; set; }
+    public DbSet<MotivoMovimiento> MotivosMovimiento { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+        base.OnModelCreating(modelBuilder);
 
-        public DbSet<Role> Roles => Set<Role>();
-        public DbSet<Usuario> Usuarios => Set<Usuario>();
-        public DbSet<Categoria> Categorias => Set<Categoria>();
-        public DbSet<Proveedor> Proveedores => Set<Proveedor>();
-        public DbSet<Producto> Productos => Set<Producto>();
-        public DbSet<MotivoMovimiento> MotivosMovimiento => Set<MotivoMovimiento>();
-        public DbSet<MovimientoInventario> MovimientosInventario => Set<MovimientoInventario>();
+        modelBuilder.Entity<Role>()
+            .HasKey(r => r.IdRole);
 
-        public DbSet<Area> Areas => Set<Area>();
-        public DbSet<UsuarioArea> UsuarioAreas => Set<UsuarioArea>();
+        modelBuilder.Entity<Usuario>()
+            .HasKey(u => u.IdUsuario);
 
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
-        {
-            base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<Usuario>()
+            .HasOne(u => u.Role)
+            .WithMany()
+            .HasForeignKey(u => u.IdRole)
+            .HasConstraintName("FK_Usuarios_Roles_IdRole");
 
-    
-            modelBuilder.Entity<Usuario>()
-                .Property(u => u.AreaId)
-                .HasColumnName("AreaId");
+        modelBuilder.Entity<UsuarioArea>()
+            .HasKey(x => new { x.IdUsuario, x.IdArea });
 
-            modelBuilder.Entity<Producto>()
-                .Property(p => p.IdArea)
-                .HasColumnName("IdArea");
+        modelBuilder.Entity<Categoria>()
+            .HasKey(c => c.IdCategoria);
 
+        modelBuilder.Entity<Proveedor>()
+            .HasKey(p => p.IdProveedor);
 
-            modelBuilder.Entity<Usuario>()
-                .HasOne(u => u.Role)
-                .WithMany()
-                .HasForeignKey(u => u.IdRole)
-                .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Producto>()
+            .HasKey(p => p.IdProducto);
 
-            modelBuilder.Entity<Producto>()
-                .HasOne(p => p.Categoria)
-                .WithMany()
-                .HasForeignKey(p => p.IdCategoria)
-                .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Producto>()
+            .HasOne(p => p.Categoria)
+            .WithMany()
+            .HasForeignKey(p => p.IdCategoria)
+            .HasConstraintName("FK_Productos_Categorias_IdCategoria");
 
-            modelBuilder.Entity<Producto>()
-                .HasOne(p => p.Proveedor)
-                .WithMany()
-                .HasForeignKey(p => p.IdProveedor)
-                .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Producto>()
+            .HasOne(p => p.Proveedor)
+            .WithMany()
+            .HasForeignKey(p => p.IdProveedor)
+            .HasConstraintName("FK_Productos_Proveedores_IdProveedor");
 
-            modelBuilder.Entity<MovimientoInventario>()
-                .HasOne(m => m.Producto)
-                .WithMany()
-                .HasForeignKey(m => m.IdProducto)
-                .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<MotivoMovimiento>()
+            .HasKey(m => m.IdMotivo);
 
-            modelBuilder.Entity<MovimientoInventario>()
-                .HasOne(m => m.Usuario)
-                .WithMany()
-                .HasForeignKey(m => m.IdUsuario)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            modelBuilder.Entity<MovimientoInventario>()
-                .HasOne(m => m.Motivo)
-                .WithMany()
-                .HasForeignKey(m => m.IdMotivo)
-                .OnDelete(DeleteBehavior.SetNull);
-
-            modelBuilder.Entity<MotivoMovimiento>()
-                .Property(x => x.TipoAplica)
-                .HasMaxLength(10);
-
-            modelBuilder.Entity<MovimientoInventario>()
-                .Property(x => x.Tipo)
-                .HasMaxLength(10);
-
-
-            modelBuilder.Entity<UsuarioArea>()
-                .ToTable("UsuarioAreas");
-
-            modelBuilder.Entity<UsuarioArea>()
-                .HasKey(x => new { x.IdUsuario, x.IdArea });
-
-            modelBuilder.Entity<UsuarioArea>()
-                .HasOne(x => x.Usuario)
-                .WithMany()
-                .HasForeignKey(x => x.IdUsuario)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            modelBuilder.Entity<UsuarioArea>()
-                .HasOne(x => x.Area)
-                .WithMany(a => a.UsuarioAreas)
-                .HasForeignKey(x => x.IdArea)
-                .OnDelete(DeleteBehavior.Cascade);
-        }
+        modelBuilder.Entity<MovimientoInventario>()
+            .HasKey(m => m.IdMovimiento);
     }
 }
