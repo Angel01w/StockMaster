@@ -21,11 +21,13 @@ public class MovimientosController : ControllerBase
 
     public record MovimientoReadDto(
         long IdMovimiento,
-        int IdProducto,
-        string Producto,
+        DateTime Fecha,
         string Tipo,
+        string Producto,
         int Cantidad,
-        DateTime Fecha
+        string Motivo,
+        string? Documento,
+        string Usuario
     );
 
     public record MovimientoCreateDto(
@@ -33,7 +35,8 @@ public class MovimientosController : ControllerBase
         string Tipo,
         int Cantidad,
         DateTime? Fecha,
-        int? IdMotivo
+        int? IdMotivo,
+        string? Documento
     );
 
     private int GetUserId()
@@ -65,7 +68,9 @@ public class MovimientosController : ControllerBase
     {
         var raw =
             User.FindFirst("IdArea")?.Value ??
-            User.FindFirst("AreaId")?.Value;
+            User.FindFirst("idArea")?.Value ??
+            User.FindFirst("AreaId")?.Value ??
+            User.FindFirst("areaId")?.Value;
 
         if (!string.IsNullOrWhiteSpace(raw) && int.TryParse(raw, out var areaFromToken) && areaFromToken > 0)
             return areaFromToken;
@@ -98,7 +103,9 @@ public class MovimientosController : ControllerBase
         [FromQuery] DateTime? desde,
         [FromQuery] DateTime? hasta,
         [FromQuery] string? tipo,
-        [FromQuery] int? productoId
+        [FromQuery] int? productoId,
+        [FromQuery] int? motivoId,
+        [FromQuery] int? usuarioId
     )
     {
         var areaId = await ResolveAreaIdOrNullAsync();
@@ -109,7 +116,17 @@ public class MovimientosController : ControllerBase
         var q =
             from m in _db.MovimientosInventario.AsNoTracking()
             join p in _db.Productos.AsNoTracking() on m.IdProducto equals p.IdProducto
-            select new { m, p };
+            join mm in _db.MotivosMovimiento.AsNoTracking() on m.IdMotivo equals mm.IdMotivo into mmj
+            from mm in mmj.DefaultIfEmpty()
+            join u in _db.Usuarios.AsNoTracking() on m.IdUsuario equals u.IdUsuario into uj
+            from u in uj.DefaultIfEmpty()
+            select new
+            {
+                m,
+                p,
+                MotivoNombre = mm != null ? (mm.Nombre ?? "") : "",
+                UsuarioNombre = u != null ? (u.Username ?? "") : ""
+            };
 
         if (areaId.HasValue)
             q = q.Where(x => x.p.IdArea == areaId.Value);
@@ -118,16 +135,21 @@ public class MovimientosController : ControllerBase
         if (hasta.HasValue) q = q.Where(x => x.m.Fecha <= hasta.Value);
         if (!string.IsNullOrWhiteSpace(tipo)) q = q.Where(x => x.m.Tipo == tipo);
         if (productoId.HasValue && productoId.Value > 0) q = q.Where(x => x.m.IdProducto == productoId.Value);
+        if (motivoId.HasValue && motivoId.Value > 0) q = q.Where(x => x.m.IdMotivo == motivoId.Value);
+        if (usuarioId.HasValue && usuarioId.Value > 0) q = q.Where(x => x.m.IdUsuario == usuarioId.Value);
 
         var list = await q
             .OrderByDescending(x => x.m.Fecha)
+            .ThenByDescending(x => x.m.IdMovimiento)
             .Select(x => new MovimientoReadDto(
                 x.m.IdMovimiento,
-                x.m.IdProducto,
-                x.p.Nombre ?? "",
+                x.m.Fecha,
                 x.m.Tipo ?? "",
+                x.p.Nombre ?? "",
                 x.m.Cantidad,
-                x.m.Fecha
+                x.MotivoNombre,
+                x.m.Documento,
+                x.UsuarioNombre
             ))
             .ToListAsync();
 
@@ -164,7 +186,7 @@ public class MovimientosController : ControllerBase
         if (string.Equals(tipo, "Salida", StringComparison.OrdinalIgnoreCase) && producto.StockActual < dto.Cantidad)
             return BadRequest("Stock insuficiente.");
 
-        var fecha = dto.Fecha.HasValue ? dto.Fecha.Value : DateTime.UtcNow;
+        var fecha = dto.Fecha ?? DateTime.UtcNow;
 
         var mov = new MovimientoInventario
         {
@@ -174,6 +196,7 @@ public class MovimientosController : ControllerBase
             Fecha = fecha,
             IdUsuario = userId,
             IdMotivo = dto.IdMotivo,
+            Documento = dto.Documento,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -185,13 +208,31 @@ public class MovimientosController : ControllerBase
         _db.MovimientosInventario.Add(mov);
         await _db.SaveChangesAsync();
 
+        var motivoNombre = "";
+        if (mov.IdMotivo.HasValue)
+        {
+            motivoNombre = await _db.MotivosMovimiento
+                .AsNoTracking()
+                .Where(x => x.IdMotivo == mov.IdMotivo.Value)
+                .Select(x => x.Nombre)
+                .FirstOrDefaultAsync() ?? "";
+        }
+
+        var usuarioNombre = await _db.Usuarios
+            .AsNoTracking()
+            .Where(x => x.IdUsuario == userId)
+            .Select(x => x.Username)
+            .FirstOrDefaultAsync() ?? "";
+
         return Ok(new MovimientoReadDto(
             mov.IdMovimiento,
-            mov.IdProducto,
-            producto.Nombre ?? "",
+            mov.Fecha,
             mov.Tipo ?? "",
+            producto.Nombre ?? "",
             mov.Cantidad,
-            mov.Fecha
+            motivoNombre,
+            mov.Documento,
+            usuarioNombre
         ));
     }
-} 
+}

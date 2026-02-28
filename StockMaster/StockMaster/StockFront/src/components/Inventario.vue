@@ -110,7 +110,7 @@
 							</span>
 						</div>
 
-						<div class="prod">{{ m.productoNombre }}</div>
+						<div class="prod">{{ productoLabel(m) }}</div>
 						<div class="num qty">{{ m.cantidad }}</div>
 						<div class="muted">{{ motivoLabel(m) }}</div>
 
@@ -420,6 +420,8 @@
 		const idUsuario = m?.idUsuario ?? m?.IdUsuario ?? null;
 
 		const productoNombre =
+			m?.producto ??
+			m?.Producto ??
 			m?.productoNombre ??
 			m?.ProductoNombre ??
 			m?.producto?.nombre ??
@@ -427,6 +429,8 @@
 			"-";
 
 		const motivoNombre =
+			m?.motivo ??
+			m?.Motivo ??
 			m?.motivoNombre ??
 			m?.MotivoNombre ??
 			m?.motivo?.nombre ??
@@ -435,6 +439,10 @@
 			"";
 
 		const usuarioNombre =
+			m?.usuario ??
+			m?.Usuario ??
+			m?.responsable ??
+			m?.Responsable ??
 			m?.usuarioNombre ??
 			m?.UsuarioNombre ??
 			m?.usuario?.nombreCompleto ??
@@ -462,6 +470,15 @@
 	function normalizeDateString(v) {
 		if (typeof v === "string") return v.slice(0, 10);
 		try { return new Date(v).toISOString().slice(0, 10); } catch { return String(v).slice(0, 10); }
+	}
+
+	function productoLabel(m) {
+		const txt = m?.productoNombre;
+		if (txt && String(txt).trim() && String(txt).trim() !== "-") return String(txt).trim();
+		const id = Number(m?.idProducto);
+		if (!id) return "-";
+		const found = productos.value.find((x) => Number(x.idProducto) === id);
+		return found?.nombre ?? "-";
 	}
 
 	function motivoLabel(m) {
@@ -582,7 +599,7 @@
 			return (
 				String(m.fecha ?? "").toLowerCase().includes(q) ||
 				String(m.tipo ?? "").toLowerCase().includes(q) ||
-				String(m.productoNombre ?? "").toLowerCase().includes(q) ||
+				String(productoLabel(m) ?? "").toLowerCase().includes(q) ||
 				String(motivoLabel(m) ?? "").toLowerCase().includes(q) ||
 				String(m.documento ?? "").toLowerCase().includes(q) ||
 				String(usuarioLabel(m) ?? "").toLowerCase().includes(q)

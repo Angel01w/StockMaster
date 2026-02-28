@@ -185,8 +185,9 @@
     import { apiFetch } from "../services/api";
 
     const API_BASE = "https://localhost:7198";
-	const PRODUCTOS_ENDPOINT = "/api/Productos";
-	const MOVS_ENDPOINT = "/api/Movimientos";
+    const PRODUCTOS_ENDPOINT = "/api/Productos";
+    const MOVS_ENDPOINT = "/api/Movimientos";
+    const CATEGORIAS_ENDPOINT = "/api/Categorias";
 
     const USUARIOS_ENDPOINTS = [
         `${API_BASE}/api/Usuarios`,
@@ -208,6 +209,7 @@
     const productos = ref([]);
     const usuarios = ref([]);
     const motivos = ref([]);
+    const categorias = ref([]);
     const movimientosRaw = ref([]);
 
     const rangeMonths = ref(6);
@@ -225,6 +227,16 @@
         entradasMes: 0,
         salidasMes: 0,
         lowStockCount: 0,
+    });
+
+    const categoriasMap = computed(() => {
+        const map = new Map();
+        for (const c of categorias.value) {
+            const id = Number(c?.idCategoria ?? c?.IdCategoria ?? c?.id ?? c?.Id ?? 0);
+            const nombre = String(c?.nombre ?? c?.Nombre ?? c?.name ?? "").trim();
+            if (id && nombre) map.set(id, nombre);
+        }
+        return map;
     });
 
     let alive = true;
@@ -280,14 +292,18 @@
 
         if (c && typeof c === "object") {
             const name = c.nombre || c.name || c.descripcion || c.description || "";
-            return String(name || "—").trim();
+            const s = String(name || "").trim();
+            if (s) return s;
         }
 
         const asStr = raw ? (raw.categoriaNombre || raw.categoryName || c) : null;
         if (asStr && String(asStr).trim()) return String(asStr).trim();
 
         const id = raw ? (raw.idCategoria || raw.categoriaId || raw.IdCategoria) : null;
-        return id ? `ID ${id}` : "—";
+        const cid = Number(id) || 0;
+        if (cid && categoriasMap.value.has(cid)) return categoriasMap.value.get(cid);
+
+        return "—";
     }
 
     function normalizeProducto(p, idx) {
@@ -349,17 +365,9 @@
                 : 0
         ) || null;
 
-        const motivoDirecto =
-            m
-                ? (m.motivoNombre ||
-                    m.MotivoNombre ||
-                    (m.motivo && (m.motivo.nombre || m.motivo.descripcion)) ||
-                    (m.Motivo && m.Motivo.Nombre) ||
-                    m.motivo ||
-                    m.comentario ||
-                    m.reason ||
-                    "")
-                : "";
+        const productoDirecto = m ? (m.producto || m.Producto || m.productoNombre || m.ProductoNombre) : "";
+        const motivoDirecto = m ? (m.motivo || m.Motivo || m.motivoNombre || m.MotivoNombre) : "";
+        const usuarioDirecto = m ? (m.usuario || m.Usuario || m.usuarioNombre || m.UsuarioNombre) : "";
 
         return {
             id,
@@ -369,8 +377,8 @@
             idUsuario,
             idMotivo,
             motivo: String(motivoDirecto || "").trim() || "",
-            producto: "",
-            responsable: "",
+            producto: String(productoDirecto || "").trim() || "",
+            responsable: String(usuarioDirecto || "").trim() || "",
             cantidad: toNumber(m ? (m.cantidad || m.Cantidad || m.qty || 0) : 0, 0),
             _dt: dt,
             _raw: m,
@@ -378,6 +386,8 @@
     }
 
     function resolveProductoNombre(m) {
+        if (m && m.producto && String(m.producto).trim() && String(m.producto).trim() !== "-") return String(m.producto).trim();
+
         const r = m ? m._raw : null;
         const direct = r ? (r.productoNombre || r.ProductoNombre || (r.producto && r.producto.nombre) || (r.Producto && r.Producto.Nombre)) : null;
         if (direct && String(direct).trim() && String(direct).trim() !== "-") return String(direct).trim();
@@ -389,6 +399,8 @@
     }
 
     function resolveUsuarioNombre(m) {
+        if (m && m.responsable && String(m.responsable).trim() && String(m.responsable).trim() !== "-") return String(m.responsable).trim();
+
         const r = m ? m._raw : null;
         const direct = r ? (r.usuarioNombre || r.UsuarioNombre || (r.usuario && (r.usuario.nombreCompleto || r.usuario.username)) || (r.Usuario && r.Usuario.NombreCompleto)) : null;
         if (direct && String(direct).trim() && String(direct).trim() !== "-") return String(direct).trim();
@@ -421,6 +433,7 @@
         try {
             const packs = await Promise.all([
                 apiFetch(PRODUCTOS_ENDPOINT),
+                apiFetch(CATEGORIAS_ENDPOINT),
                 fetchFirstList(USUARIOS_ENDPOINTS),
                 fetchFirstList(MOTIVOS_ENDPOINTS),
                 apiFetch(MOVS_ENDPOINT),
@@ -429,9 +442,12 @@
             if (!alive) return;
 
             const prodsRaw = packs[0];
-            const usersPack = packs[1];
-            const motivosPack = packs[2];
-            const movsRaw = packs[3];
+            const catsRaw = packs[1];
+            const usersPack = packs[2];
+            const motivosPack = packs[3];
+            const movsRaw = packs[4];
+
+            categorias.value = normalizeList(catsRaw);
 
             productos.value = normalizeList(prodsRaw).map((p, i) => normalizeProducto(p, i));
             usuarios.value = normalizeList(usersPack.list).map((u, i) => normalizeUsuario(u, i)).filter((x) => x.id && x.nombre);
