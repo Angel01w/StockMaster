@@ -23,7 +23,7 @@
 						<div class="selectWrap">
 							<select v-model="form.tipo" :disabled="generating">
 								<option value="stock-actual">Stock Actual</option>
-								<option value="movimientos-mes">Movimientos del Mes</option>
+								<option value="movimientos-mes">Movimientos (Mes/Año)</option>
 								<option value="stock-critico">Stock Crítico</option>
 							</select>
 							<span class="chev" aria-hidden="true">▾</span>
@@ -32,27 +32,30 @@
 
 					<div class="datesRow">
 						<div class="field">
-							<label>Fecha Desde</label>
-							<div class="dateWrap">
-								<input type="date"
-									   v-model="form.desde"
-									   :disabled="generating || form.tipo === 'movimientos-mes'" />
+							<label>Mes</label>
+							<div class="selectWrap">
+								<select v-model.number="form.mes" :disabled="generating || form.tipo !== 'movimientos-mes'">
+									<option v-for="m in meses" :key="m.value" :value="m.value">{{ m.label }}</option>
+								</select>
+								<span class="chev" aria-hidden="true">▾</span>
 							</div>
 						</div>
 
 						<div class="field">
-							<label>Fecha Hasta</label>
+							<label>Año</label>
 							<div class="dateWrap">
-								<input type="date"
-									   v-model="form.hasta"
-									   :disabled="generating || form.tipo === 'movimientos-mes'" />
+								<input type="number"
+									   min="2000"
+									   max="2100"
+									   v-model.number="form.anio"
+									   :disabled="generating || form.tipo !== 'movimientos-mes'" />
 							</div>
 						</div>
 					</div>
 				</div>
 
-				<div class="hint" v-if="form.tipo === 'movimientos-mes'">
-					Este reporte se genera del mes actual. Las fechas son opcionales (se ignoran).
+				<div class="hint" v-if="form.tipo !== 'movimientos-mes'">
+					Stock Actual y Stock Crítico no requieren fechas.
 				</div>
 
 				<div v-if="loadError" class="hintErr">
@@ -75,8 +78,8 @@
 
 				<div class="card mini">
 					<div class="mini-ico green">📅</div>
-					<div class="mini-title">Movimientos del Mes</div>
-					<div class="mini-sub">Historial de entradas y salidas del mes actual</div>
+					<div class="mini-title">Movimientos (Mes/Año)</div>
+					<div class="mini-sub">Historial de entradas y salidas por mes y año</div>
 					<button class="link" type="button" :disabled="generating" @click="quickReport('movimientos-mes')">Ver Reporte →</button>
 				</div>
 
@@ -107,7 +110,7 @@
 								title="Descargar"
 								aria-label="Descargar"
 								:disabled="generating"
-								@click="downloadFromUrl(r.url, r.fileName, r.tipo, r.desde, r.hasta)">
+								@click="downloadFromUrl(r.url, r.fileName, r.tipo, r.mes, r.anio)">
 							⬇
 						</button>
 					</div>
@@ -123,6 +126,7 @@
 	import { onMounted, reactive, ref, computed } from "vue";
 	import { getUser } from "../router/auth.service";
 	import { getPermsSafe } from "../services/permissions";
+	import { apiFetch } from "../services/api";
 
 	const user = computed(() => getUser());
 	const perms = computed(() => getPermsSafe(user.value));
@@ -133,31 +137,40 @@
 			perms.value?.canEditAll === true
 	);
 
-	const API_BASE = "https://localhost:7198";
-	const PRODUCTOS_ENDPOINT = `${API_BASE}/api/Productos`;
-	const MOVS_ENDPOINT = `${API_BASE}/api/Movimientos`;
+	const PRODUCTOS_ENDPOINT = `/api/Productos`;
+	const MOVS_ENDPOINT = `/api/Movimientos`;
+	const CATEGORIAS_ENDPOINT = `/api/Categorias`;
 
-	const USUARIOS_ENDPOINTS = [
-		`${API_BASE}/api/Usuarios`,
-		`${API_BASE}/api/Usuario`,
-		`${API_BASE}/api/Users`,
-		`${API_BASE}/api/UsuariosSistema`,
-	];
-
-	const MOTIVOS_ENDPOINTS = [
-		`${API_BASE}/api/Motivos`,
-		`${API_BASE}/api/Motivo`,
-		`${API_BASE}/api/MotivosMovimiento`,
-		`${API_BASE}/api/MotivoMovimiento`,
-	];
+	const USUARIOS_ENDPOINTS = [`/api/Usuarios`];
+	const MOTIVOS_ENDPOINTS = [`/api/MotivosMovimiento`];
 
 	const generating = ref(false);
 	const loadError = ref("");
 
+	const meses = [
+		{ value: 1, label: "Enero" },
+		{ value: 2, label: "Febrero" },
+		{ value: 3, label: "Marzo" },
+		{ value: 4, label: "Abril" },
+		{ value: 5, label: "Mayo" },
+		{ value: 6, label: "Junio" },
+		{ value: 7, label: "Julio" },
+		{ value: 8, label: "Agosto" },
+		{ value: 9, label: "Septiembre" },
+		{ value: 10, label: "Octubre" },
+		{ value: 11, label: "Noviembre" },
+		{ value: 12, label: "Diciembre" },
+	];
+
+	function nowMonthYear() {
+		const d = new Date();
+		return { mes: d.getMonth() + 1, anio: d.getFullYear() };
+	}
+
 	const form = reactive({
 		tipo: "stock-actual",
-		desde: "",
-		hasta: "",
+		mes: nowMonthYear().mes,
+		anio: nowMonthYear().anio,
 	});
 
 	const toast = reactive({ msg: "", kind: "ok" });
@@ -207,36 +220,19 @@
 		return Number.isFinite(n) ? n : d;
 	}
 
-	async function fetchJson(url, opts = {}) {
-		const res = await fetch(url, opts);
-		if (!res.ok) {
-			let msg = `${res.status} ${res.statusText}`;
-			try {
-				const ct = res.headers.get("content-type") || "";
-				if (ct.includes("application/json")) {
-					const j = await res.json();
-					msg = j?.message || j?.error || j?.title || msg;
-				} else {
-					const t = await res.text();
-					if (t?.trim()) msg = `${msg}: ${t}`;
-				}
-			} catch { }
-			throw new Error(`${msg} [${url}]`);
+	async function apiFetchJson(url, opts = {}) {
+		try {
+			return await apiFetch(url, opts);
+		} catch (e) {
+			throw new Error(`${e?.message || "Error"} [${url}]`);
 		}
-
-		if (res.status === 204) return null;
-
-		const ct = res.headers.get("content-type") || "";
-		if (ct.includes("application/json")) return await res.json();
-		const text = await res.text();
-		return text ? JSON.parse(text) : null;
 	}
 
 	async function fetchFirstList(endpoints) {
 		let lastErr = null;
 		for (const url of endpoints) {
 			try {
-				const data = await fetchJson(url);
+				const data = await apiFetchJson(url);
 				return { url, list: normalizeList(data) };
 			} catch (e) {
 				lastErr = e;
@@ -265,7 +261,7 @@
 		return id ? `ID ${id}` : "—";
 	}
 
-	function normalizeProducto(p, idx) {
+	function normalizeProducto(p, idx, categoriaById) {
 		const id =
 			p?.idProducto ?? p?.IdProducto ?? p?.id ?? p?.Id ?? p?.productoId ?? idx;
 
@@ -278,12 +274,19 @@
 			p?.stockMinimo ?? p?.StockMinimo ?? p?.minimo ?? p?.minStock ?? p?.reorderLevel,
 			0
 		);
-		const categoriaNombre = extractCategoriaNombre(p);
+
+		const idCat = p?.idCategoria ?? p?.IdCategoria ?? p?.categoriaId ?? p?.CategoriaId ?? null;
+
+		const categoriaNombre =
+			p?.categoria?.nombre ??
+			p?.Categoria?.Nombre ??
+			categoriaById?.get(Number(idCat)) ??
+			extractCategoriaNombre(p);
 
 		return {
 			id: Number(id),
 			nombre: String(nombre ?? "").trim(),
-			categoriaNombre,
+			categoriaNombre: String(categoriaNombre ?? "—").trim() || "—",
 			stock,
 			minimo,
 			_raw: p,
@@ -336,7 +339,30 @@
 			else if (t === "entrada" || t === "salida") tipo = t[0].toUpperCase() + t.slice(1);
 		}
 
-		const idProducto = Number(m?.idProducto ?? m?.IdProducto ?? m?.productoId ?? 0) || null;
+		const prodRaw = m?.producto ?? m?.Producto ?? m?.product ?? m?.Product ?? null;
+		const prodObj = (prodRaw && typeof prodRaw === "object") ? prodRaw : null;
+
+		const idProducto =
+			Number(
+				m?.idProducto ??
+				m?.IdProducto ??
+				m?.productoId ??
+				m?.ProductoId ??
+				m?.idproducto ??
+				m?.producto_id ??
+				0
+			) ||
+			Number(
+				prodObj?.idProducto ??
+				prodObj?.IdProducto ??
+				prodObj?.id ??
+				prodObj?.Id ??
+				prodObj?.productoId ??
+				prodObj?.ProductoId ??
+				0
+			) ||
+			null;
+
 		const idUsuario = Number(m?.idUsuario ?? m?.IdUsuario ?? m?.usuarioId ?? 0) || null;
 
 		const idMotivo =
@@ -360,6 +386,18 @@
 			m?.reason ??
 			"";
 
+		const prodDirecto =
+			(typeof prodRaw === "string" ? prodRaw : "") ||
+			prodObj?.nombre ||
+			prodObj?.Nombre ||
+			prodObj?.descripcion ||
+			prodObj?.Descripcion ||
+			m?.productoNombre ||
+			m?.ProductoNombre ||
+			m?.nombreProducto ||
+			m?.NombreProducto ||
+			"";
+
 		return {
 			id,
 			_dt: dt && !isNaN(dt.getTime()) ? dt : null,
@@ -369,34 +407,28 @@
 			idUsuario,
 			idMotivo,
 			motivo: String(motivoDirecto ?? "").trim() || "",
+			productoNombre: String(prodDirecto ?? "").trim() || "",
 			cantidad: toNumber(m?.cantidad ?? m?.Cantidad ?? m?.qty ?? 0, 0),
 			_raw: m,
 		};
 	}
 
-	function buildFileName(tipo, desde, hasta) {
-		const t =
-			tipo === "stock-actual"
-				? "Stock_Actual"
-				: tipo === "movimientos-mes"
-					? "Movimientos_Mes"
-					: "Stock_Critico";
+	function buildFileName(tipo, mes, anio) {
+		if (tipo === "movimientos-mes") return `Reporte_Movimientos_${anio}_${String(mes).padStart(2, "0")}.pdf`;
+		if (tipo === "stock-actual") return `Reporte_Stock_Actual_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}.pdf`;
+		return `Reporte_Stock_Critico_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}.pdf`;
+	}
 
-		const d = (desde || "sin_desde").replaceAll("-", "");
-		const h = (hasta || "sin_hasta").replaceAll("-", "");
-		return `Reporte_${t}_${d}_${h}.pdf`;
+	function monthStartFrom(mes, anio) {
+		return new Date(anio, mes - 1, 1);
+	}
+
+	function monthEndFrom(mes, anio) {
+		return new Date(anio, mes, 0);
 	}
 
 	function ymdToday() {
 		return new Date().toISOString().slice(0, 10);
-	}
-
-	function monthStart(d = new Date()) {
-		return new Date(d.getFullYear(), d.getMonth(), 1);
-	}
-
-	function monthEnd(d = new Date()) {
-		return new Date(d.getFullYear(), d.getMonth() + 1, 0);
 	}
 
 	function clip(s, n) {
@@ -558,18 +590,19 @@
 		return "-".repeat(totalWidth);
 	}
 
-	async function buildReportPdf(tipo, desde, hasta) {
+	async function buildReportPdf(tipo, mes, anio) {
 		if (!canDownload.value) {
 			throw new Error("Tu rol está en solo lectura y no tiene permiso para descargar reportes.");
 		}
 
 		loadError.value = "";
 
-		const [prodsRaw, usersPack, motivosPack, movsRaw] = await Promise.all([
-			fetchJson(PRODUCTOS_ENDPOINT),
+		const [prodsRaw, catsRaw, usersPack, motivosPack, movsRaw] = await Promise.all([
+			apiFetchJson(PRODUCTOS_ENDPOINT),
+			apiFetchJson(CATEGORIAS_ENDPOINT),
 			fetchFirstList(USUARIOS_ENDPOINTS),
 			fetchFirstList(MOTIVOS_ENDPOINTS),
-			fetchJson(MOVS_ENDPOINT),
+			apiFetchJson(MOVS_ENDPOINT),
 		]);
 
 		if (usersPack?.error) loadError.value = usersPack.error;
@@ -578,8 +611,16 @@
 				? `${loadError.value} | ${motivosPack.error}`
 				: motivosPack.error;
 
+		const categorias = normalizeList(catsRaw);
+		const categoriaById = new Map(
+			categorias.map((c) => [
+				Number(c.idCategoria ?? c.IdCategoria ?? c.id ?? c.Id),
+				String(c.nombre ?? c.Nombre ?? "—").trim() || "—",
+			])
+		);
+
 		const productos = normalizeList(prodsRaw)
-			.map((p, i) => normalizeProducto(p, i))
+			.map((p, i) => normalizeProducto(p, i, categoriaById))
 			.filter((p) => p.id && p.nombre);
 
 		const usuarios = normalizeList(usersPack.list)
@@ -598,7 +639,7 @@
 
 		if (tipo === "stock-actual") {
 			const t = "Reporte: Stock Actual";
-			const sub = `Fecha: ${ymdToday()}   Desde: ${desde || "—"}   Hasta: ${hasta || "—"}   Total: ${productos.length}`;
+			const sub = `Fecha: ${ymdToday()}   Total: ${productos.length}`;
 
 			const totalW = 96;
 			const lines = [];
@@ -642,14 +683,10 @@
 			return pdfBuildFromPages(pages);
 		}
 
-		// movimientos-mes (mes actual)
-		const now = new Date();
-		const from = monthStart(now);
-		const to = monthEnd(now);
-
+		const from = monthStartFrom(mes, anio);
+		const to = monthEndFrom(mes, anio);
 		const fromIso = from.toISOString().slice(0, 10);
 		const toIso = to.toISOString().slice(0, 10);
-
 		const toEnd = new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59, 999);
 
 		const list = movimientos
@@ -657,7 +694,8 @@
 			.sort((a, b) => (b._dt ? b._dt.getTime() : 0) - (a._dt ? a._dt.getTime() : 0));
 
 		const t = "Reporte: Movimientos del Mes";
-		const sub = `Periodo: ${fromIso} a ${toIso}   Total: ${list.length}`;
+		const mesLabel = meses.find((x) => x.value === Number(mes))?.label || String(mes);
+		const sub = `Periodo: ${mesLabel} ${anio} (${fromIso} a ${toIso})   Total: ${list.length}`;
 
 		const totalW = 112;
 		const lines = [];
@@ -665,12 +703,16 @@
 		lines.push(rowSep(totalW));
 
 		for (const m of list) {
-			const prod = prodById.get(Number(m.idProducto))?.nombre || `ID ${m.idProducto || "—"}`;
-			const usu = userById.get(Number(m.idUsuario))?.nombre || `ID ${m.idUsuario || "—"}`;
+			const prod =
+				(m.productoNombre && m.productoNombre.trim())
+					? m.productoNombre
+					: (prodById.get(Number(m.idProducto))?.nombre || "—");
+
+			const usu = userById.get(Number(m.idUsuario))?.nombre || "—";
 			const mot =
 				(m.motivo?.trim() || "") ||
 				motivoById.get(Number(m.idMotivo))?.nombre ||
-				`ID ${m.idMotivo || "—"}`;
+				"—";
 
 			lines.push(`| ${col(m.fechaIso || "", 10)} | ${col(m.tipo, 8)} | ${col(m.cantidad, 6, "right")} | ${col(prod, 34)} | ${col(mot, 20)} | ${col(usu, 22)} |`);
 		}
@@ -688,18 +730,18 @@
 		generating.value = true;
 		try {
 			const tipo = form.tipo;
-			const desde = form.desde || "";
-			const hasta = form.hasta || "";
+			const mes = form.mes;
+			const anio = form.anio;
 
-			const blob = await buildReportPdf(tipo, desde, hasta);
-			const fileName = buildFileName(tipo, desde, hasta);
+			const blob = await buildReportPdf(tipo, mes, anio);
+			const fileName = buildFileName(tipo, mes, anio);
 			downloadBlob(blob, fileName);
 
 			const nombre =
 				tipo === "stock-actual"
 					? "Reporte de Stock Actual"
 					: tipo === "movimientos-mes"
-						? "Movimientos del Mes"
+						? `Movimientos (${String(mes).padStart(2, "0")}/${anio})`
 						: "Stock Crítico";
 
 			recentReports.value.unshift({
@@ -709,8 +751,8 @@
 				fecha: new Date().toLocaleString("es-DO"),
 				url: "",
 				fileName,
-				desde,
-				hasta,
+				mes,
+				anio,
 			});
 
 			recentReports.value = recentReports.value.slice(0, 10);
@@ -729,7 +771,7 @@
 		generateAndDownload();
 	}
 
-	function downloadFromUrl(url, fileName, tipo, desde, hasta) {
+	function downloadFromUrl(url, fileName, tipo, mes, anio) {
 		if (!canDownload.value) {
 			showToast("Solo lectura: sin permiso para descargar reportes.", "warn");
 			return;
@@ -746,8 +788,10 @@
 		}
 
 		form.tipo = tipo || form.tipo;
-		form.desde = desde || form.desde;
-		form.hasta = hasta || form.hasta;
+		if (tipo === "movimientos-mes") {
+			form.mes = mes || form.mes;
+			form.anio = anio || form.anio;
+		}
 		generateAndDownload();
 	}
 </script>
@@ -1000,7 +1044,7 @@
 	}
 
 		.link:disabled {
-			opacity: .6;
+			opacity: 0.6;
 			cursor: not-allowed;
 		}
 
@@ -1068,7 +1112,7 @@
 	}
 
 		.dl:disabled {
-			opacity: .6;
+			opacity: 0.6;
 			cursor: not-allowed;
 		}
 
