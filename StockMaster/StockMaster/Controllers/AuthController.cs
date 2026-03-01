@@ -34,6 +34,7 @@ public class AuthController : ControllerBase
         string Username,
         string Rol,
         int? AreaId,
+        int? ProveedorId,
         string Token
     );
 
@@ -78,7 +79,9 @@ public class AuthController : ControllerBase
 
             var roleName = role.Nombre ?? "Usuario";
             var areaIdResolved = await ResolveAreaIdAsync(user.IdUsuario);
-            var token = GenerateJwt(user.IdUsuario, user.Username ?? "", roleName, areaIdResolved);
+            var proveedorIdResolved = await ResolveProveedorIdAsync(user.IdUsuario);
+
+            var token = GenerateJwt(user.IdUsuario, user.Username ?? "", roleName, areaIdResolved, proveedorIdResolved);
 
             return Ok(new AuthResponse(
                 user.IdUsuario,
@@ -87,6 +90,7 @@ public class AuthController : ControllerBase
                 user.Username ?? "",
                 roleName,
                 areaIdResolved,
+                proveedorIdResolved,
                 token
             ));
         }
@@ -136,7 +140,9 @@ public class AuthController : ControllerBase
             await _db.SaveChangesAsync();
 
             var areaIdResolved = await ResolveAreaIdAsync(user.IdUsuario);
-            var token = GenerateJwt(user.IdUsuario, user.Username ?? "", roleName, areaIdResolved);
+            var proveedorIdResolved = await ResolveProveedorIdAsync(user.IdUsuario);
+
+            var token = GenerateJwt(user.IdUsuario, user.Username ?? "", roleName, areaIdResolved, proveedorIdResolved);
 
             return Ok(new AuthResponse(
                 user.IdUsuario,
@@ -145,6 +151,7 @@ public class AuthController : ControllerBase
                 user.Username ?? "",
                 roleName,
                 areaIdResolved,
+                proveedorIdResolved,
                 token
             ));
         }
@@ -202,7 +209,35 @@ public class AuthController : ControllerBase
         return area;
     }
 
-    private string GenerateJwt(int idUsuario, string username, string role, int? areaId)
+    private async Task<int?> ResolveProveedorIdAsync(int idUsuario)
+    {
+        int? TryGet(string propName)
+        {
+            try
+            {
+                return _db.Usuarios
+                    .AsNoTracking()
+                    .Where(x => x.IdUsuario == idUsuario)
+                    .Select(x => EF.Property<int?>(x, propName))
+                    .FirstOrDefault();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        var p =
+            TryGet("IdProveedor") ??
+            TryGet("idProveedor") ??
+            TryGet("ProveedorId") ??
+            TryGet("proveedorId");
+
+        if (p.HasValue && p.Value > 0) return p.Value;
+        return null;
+    }
+
+    private string GenerateJwt(int idUsuario, string username, string role, int? areaId, int? proveedorId)
     {
         var key = _config["Jwt:Key"];
         var issuer = _config["Jwt:Issuer"];
@@ -233,6 +268,9 @@ public class AuthController : ControllerBase
             new Claim("idUsuario", idUsuario.ToString()),
             new Claim("IdUsuario", idUsuario.ToString()),
             new Claim(ClaimTypes.Role, role),
+            new Claim("role", role),
+            new Claim("Role", role),
+            new Claim("rol", role),
             new Claim("Rol", role),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
@@ -240,7 +278,17 @@ public class AuthController : ControllerBase
         if (areaId.HasValue && areaId.Value > 0)
         {
             claims.Add(new Claim("IdArea", areaId.Value.ToString()));
+            claims.Add(new Claim("idArea", areaId.Value.ToString()));
             claims.Add(new Claim("AreaId", areaId.Value.ToString()));
+            claims.Add(new Claim("areaId", areaId.Value.ToString()));
+        }
+
+        if (proveedorId.HasValue && proveedorId.Value > 0)
+        {
+            claims.Add(new Claim("IdProveedor", proveedorId.Value.ToString()));
+            claims.Add(new Claim("idProveedor", proveedorId.Value.ToString()));
+            claims.Add(new Claim("ProveedorId", proveedorId.Value.ToString()));
+            claims.Add(new Claim("proveedorId", proveedorId.Value.ToString()));
         }
 
         var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));

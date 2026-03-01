@@ -28,7 +28,8 @@ public class ProductosController : ControllerBase
         decimal PrecioCompra,
         decimal PrecioVenta,
         int StockActual,
-        int StockMinimo
+        int StockMinimo,
+        int? IdArea
     );
 
     public record ProductoUpdateDto(
@@ -40,7 +41,8 @@ public class ProductosController : ControllerBase
         decimal PrecioCompra,
         decimal PrecioVenta,
         int StockActual,
-        int StockMinimo
+        int StockMinimo,
+        int? IdArea
     );
 
     private int GetUserId()
@@ -61,12 +63,19 @@ public class ProductosController : ControllerBase
         return
             User.FindFirst(ClaimTypes.Role)?.Value ??
             User.FindFirst("role")?.Value ??
+            User.FindFirst("Role")?.Value ??
+            User.FindFirst("rol")?.Value ??
             User.FindFirst("Rol")?.Value ??
             "";
     }
 
-    private bool IsAdmin() => string.Equals(GetRole(), "Admin", StringComparison.OrdinalIgnoreCase);
-    private bool IsAuditor() => string.Equals(GetRole(), "Auditor", StringComparison.OrdinalIgnoreCase);
+    private bool IsAdmin() =>
+        string.Equals(GetRole(), "Admin", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(GetRole(), "admin", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsAuditor() =>
+        string.Equals(GetRole(), "Auditor", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(GetRole(), "auditor", StringComparison.OrdinalIgnoreCase);
 
     private async Task<int?> ResolveAreaIdOrNullAsync()
     {
@@ -102,21 +111,30 @@ public class ProductosController : ControllerBase
         return null;
     }
 
-    private async Task<int> ResolveAreaIdForCreateAsync()
+    private async Task<int?> ResolveProveedorIdOrNullAsync()
     {
-        var fromUser = await ResolveAreaIdOrNullAsync();
-        if (fromUser.HasValue && fromUser.Value > 0) return fromUser.Value;
+        var userId = GetUserId();
 
+        var prov = await _db.Usuarios
+            .AsNoTracking()
+            .Where(u => u.IdUsuario == userId)
+            .Select(u => (int?)u.IdProveedor)
+            .FirstOrDefaultAsync();
+
+        if (prov.HasValue && prov.Value > 0) return prov.Value;
+        return null;
+    }
+
+    private async Task<int> ResolveAreaIdForCreateAsync(int? dtoAreaId)
+    {
         if (IsAdmin())
         {
-            var anyArea = await _db.Productos
-                .AsNoTracking()
-                .Select(p => (int?)p.IdArea)
-                .FirstOrDefaultAsync();
-
-            if (anyArea.HasValue && anyArea.Value > 0) return anyArea.Value;
-            return 1;
+            if (dtoAreaId.HasValue && dtoAreaId.Value > 0) return dtoAreaId.Value;
+            return 2;
         }
+
+        var fromUser = await ResolveAreaIdOrNullAsync();
+        if (fromUser.HasValue && fromUser.Value > 0) return fromUser.Value;
 
         throw new InvalidOperationException("No se pudo resolver el IdArea del usuario.");
     }
@@ -125,14 +143,21 @@ public class ProductosController : ControllerBase
     public async Task<ActionResult<List<Producto>>> GetAll()
     {
         var areaId = await ResolveAreaIdOrNullAsync();
+        var proveedorId = await ResolveProveedorIdOrNullAsync();
 
         if (!areaId.HasValue && !(IsAdmin() || IsAuditor()))
             return Unauthorized("Token sin IdArea/AreaId válido.");
 
+        if (!(IsAdmin() || IsAuditor()) && !proveedorId.HasValue)
+            return Unauthorized("Usuario sin IdProveedor asignado.");
+
         var q = _db.Productos.AsNoTracking().AsQueryable();
 
-        if (areaId.HasValue && !(IsAdmin() || IsAuditor()))
+        if (!(IsAdmin() || IsAuditor()))
+        {
             q = q.Where(x => x.IdArea == areaId.Value);
+            q = q.Where(x => x.IdProveedor == proveedorId.Value);
+        }
 
         var list = await q.OrderBy(x => x.Nombre).ToListAsync();
         return list;
@@ -142,14 +167,18 @@ public class ProductosController : ControllerBase
     public async Task<ActionResult<Producto>> GetById(int id)
     {
         var areaId = await ResolveAreaIdOrNullAsync();
+        var proveedorId = await ResolveProveedorIdOrNullAsync();
 
         if (!areaId.HasValue && !(IsAdmin() || IsAuditor()))
             return Unauthorized("Token sin IdArea/AreaId válido.");
 
+        if (!(IsAdmin() || IsAuditor()) && !proveedorId.HasValue)
+            return Unauthorized("Usuario sin IdProveedor asignado.");
+
         var q = _db.Productos.AsNoTracking().Where(x => x.IdProducto == id);
 
-        if (areaId.HasValue && !(IsAdmin() || IsAuditor()))
-            q = q.Where(x => x.IdArea == areaId.Value);
+        if (!(IsAdmin() || IsAuditor()))
+            q = q.Where(x => x.IdArea == areaId.Value && x.IdProveedor == proveedorId.Value);
 
         var item = await q.FirstOrDefaultAsync();
         if (item is null) return NotFound();
@@ -161,9 +190,23 @@ public class ProductosController : ControllerBase
     {
         if (IsAuditor()) return Forbid();
 
+        var proveedorId = await ResolveProveedorIdOrNullAsync();
+        if (!(IsAdmin() || IsAuditor()) && !proveedorId.HasValue)
+            return Unauthorized("Usuario sin IdProveedor asignado.");
+
         int areaId;
-        try { areaId = await ResolveAreaIdForCreateAsync(); }
-        catch { return Unauthorized("No se pudo resolver el IdArea del usuario."); }
+        try { areaId = await ResolveAreaIdForCreateAsync(dto.IdArea); }
+        catch (Exception ex) { return BadRequest(ex.Message); }
+
+        if (!(IsAdmin() || IsAuditor()))
+        {
+            var userArea = await ResolveAreaIdOrNullAsync();
+            if (!userArea.HasValue) return Unauthorized("Token sin IdArea/AreaId válido.");
+            areaId = userArea.Value;
+
+            if (dto.IdProveedor != proveedorId.Value)
+                return Forbid();
+        }
 
         var codigo = (dto.Codigo ?? "").Trim();
         var nombre = (dto.Nombre ?? "").Trim();
@@ -180,7 +223,7 @@ public class ProductosController : ControllerBase
             Nombre = nombre,
             Descripcion = string.IsNullOrWhiteSpace(dto.Descripcion) ? null : dto.Descripcion.Trim(),
             IdCategoria = dto.IdCategoria,
-            IdProveedor = dto.IdProveedor,
+            IdProveedor = IsAdmin() ? dto.IdProveedor : proveedorId.Value,
             PrecioCompra = dto.PrecioCompra,
             PrecioVenta = dto.PrecioVenta,
             StockActual = dto.StockActual,
@@ -201,17 +244,24 @@ public class ProductosController : ControllerBase
         if (IsAuditor()) return Forbid();
 
         var areaId = await ResolveAreaIdOrNullAsync();
+        var proveedorId = await ResolveProveedorIdOrNullAsync();
 
         if (!areaId.HasValue && !IsAdmin())
             return Unauthorized("Token sin IdArea/AreaId válido.");
 
+        if (!IsAdmin() && !proveedorId.HasValue)
+            return Unauthorized("Usuario sin IdProveedor asignado.");
+
         var q = _db.Productos.Where(x => x.IdProducto == id);
 
-        if (areaId.HasValue && !IsAdmin())
-            q = q.Where(x => x.IdArea == areaId.Value);
+        if (!IsAdmin())
+            q = q.Where(x => x.IdArea == areaId.Value && x.IdProveedor == proveedorId.Value);
 
         var producto = await q.FirstOrDefaultAsync();
         if (producto is null) return NotFound();
+
+        if (IsAdmin() && dto.IdArea.HasValue && dto.IdArea.Value > 0)
+            producto.IdArea = dto.IdArea.Value;
 
         var codigo = (dto.Codigo ?? "").Trim();
         var nombre = (dto.Nombre ?? "").Trim();
@@ -228,7 +278,10 @@ public class ProductosController : ControllerBase
         producto.Nombre = nombre;
         producto.Descripcion = string.IsNullOrWhiteSpace(dto.Descripcion) ? null : dto.Descripcion.Trim();
         producto.IdCategoria = dto.IdCategoria;
-        producto.IdProveedor = dto.IdProveedor;
+
+        if (IsAdmin())
+            producto.IdProveedor = dto.IdProveedor;
+
         producto.PrecioCompra = dto.PrecioCompra;
         producto.PrecioVenta = dto.PrecioVenta;
         producto.StockActual = dto.StockActual;
@@ -245,14 +298,18 @@ public class ProductosController : ControllerBase
         if (IsAuditor()) return Forbid();
 
         var areaId = await ResolveAreaIdOrNullAsync();
+        var proveedorId = await ResolveProveedorIdOrNullAsync();
 
         if (!areaId.HasValue && !IsAdmin())
             return Unauthorized("Token sin IdArea/AreaId válido.");
 
+        if (!IsAdmin() && !proveedorId.HasValue)
+            return Unauthorized("Usuario sin IdProveedor asignado.");
+
         var q = _db.Productos.Where(x => x.IdProducto == id);
 
-        if (areaId.HasValue && !IsAdmin())
-            q = q.Where(x => x.IdArea == areaId.Value);
+        if (!IsAdmin())
+            q = q.Where(x => x.IdArea == areaId.Value && x.IdProveedor == proveedorId.Value);
 
         var producto = await q.FirstOrDefaultAsync();
         if (producto is null) return NotFound();

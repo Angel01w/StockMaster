@@ -10,6 +10,7 @@ public class AppDbContext : DbContext
     public DbSet<Usuario> Usuarios { get; set; }
     public DbSet<Role> Roles { get; set; }
     public DbSet<UsuarioArea> UsuarioAreas { get; set; }
+    public DbSet<UsuarioCategoria> UsuarioCategorias { get; set; }
     public DbSet<Producto> Productos { get; set; }
     public DbSet<MovimientoInventario> MovimientosInventario { get; set; }
     public DbSet<Categoria> Categorias { get; set; }
@@ -21,11 +22,9 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.Entity<Role>()
-            .HasKey(r => r.IdRole);
+        modelBuilder.Entity<Role>().HasKey(r => r.IdRole);
 
-        modelBuilder.Entity<Usuario>()
-            .HasKey(u => u.IdUsuario);
+        modelBuilder.Entity<Usuario>().HasKey(u => u.IdUsuario);
 
         modelBuilder.Entity<Usuario>()
             .HasOne(u => u.Role)
@@ -36,17 +35,28 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<UsuarioArea>()
             .HasKey(x => new { x.IdUsuario, x.IdArea });
 
-        modelBuilder.Entity<Area>()
-            .HasKey(a => a.IdArea);
+        modelBuilder.Entity<UsuarioCategoria>()
+            .HasKey(x => new { x.IdUsuario, x.IdCategoria });
 
-        modelBuilder.Entity<Categoria>()
-            .HasKey(c => c.IdCategoria);
+        modelBuilder.Entity<UsuarioCategoria>()
+            .HasOne(x => x.Usuario)
+            .WithMany()
+            .HasForeignKey(x => x.IdUsuario)
+            .HasConstraintName("FK_UsuarioCategorias_Usuarios_IdUsuario");
 
-        modelBuilder.Entity<Proveedor>()
-            .HasKey(p => p.IdProveedor);
+        modelBuilder.Entity<UsuarioCategoria>()
+            .HasOne(x => x.Categoria)
+            .WithMany()
+            .HasForeignKey(x => x.IdCategoria)
+            .HasConstraintName("FK_UsuarioCategorias_Categorias_IdCategoria");
 
-        modelBuilder.Entity<Producto>()
-            .HasKey(p => p.IdProducto);
+        modelBuilder.Entity<Area>().HasKey(a => a.IdArea);
+
+        modelBuilder.Entity<Categoria>().HasKey(c => c.IdCategoria);
+
+        modelBuilder.Entity<Proveedor>().HasKey(p => p.IdProveedor);
+
+        modelBuilder.Entity<Producto>().HasKey(p => p.IdProducto);
 
         modelBuilder.Entity<Producto>()
             .HasOne(p => p.Categoria)
@@ -66,11 +76,9 @@ public class AppDbContext : DbContext
             .HasForeignKey(p => p.IdArea)
             .HasConstraintName("FK_Productos_Areas");
 
-        modelBuilder.Entity<MotivoMovimiento>()
-            .HasKey(m => m.IdMotivo);
+        modelBuilder.Entity<MotivoMovimiento>().HasKey(m => m.IdMotivo);
 
-        modelBuilder.Entity<MovimientoInventario>()
-            .HasKey(m => m.IdMovimiento);
+        modelBuilder.Entity<MovimientoInventario>().HasKey(m => m.IdMovimiento);
 
         modelBuilder.Entity<MovimientoInventario>()
             .Property(m => m.IdMovimiento)

@@ -25,7 +25,11 @@
 
 			<div class="search">
 				<div class="search-ic">🔍</div>
-				<input v-model="search" class="search-in" placeholder="Buscar categorías..." />
+				<input v-model="searchQ" class="search-in" placeholder="Buscar categorías..." />
+			</div>
+
+			<div v-if="loadError" class="alert" style="margin-bottom: 16px">
+				{{ loadError }}
 			</div>
 
 			<div v-if="apiError && !isOpen" class="alert" style="margin-bottom: 16px">
@@ -60,10 +64,7 @@
 
 					<div class="card-foot">
 						<div class="foot-lbl">Productos</div>
-
-						<div class="foot-num">
-							{{ productosCount(c) }}
-						</div>
+						<div class="foot-num">{{ productosCount(c) }}</div>
 					</div>
 				</div>
 			</div>
@@ -114,21 +115,21 @@
 
 <script setup>
 	import { computed, onMounted, reactive, ref } from "vue";
-	import { getUser } from "../router/auth.service";
-	import { getPermsSafe } from "../services/permissions";
+	import { getUser, getPermsSafe } from "../router/auth.service";
+	import { apiFetch } from "../services/api";
 
 	const user = computed(() => getUser());
-	const perms = computed(() => getPermsSafe(user.value));
-	const canEdit = computed(() => perms.value?.canEditCatalogos === true || perms.value?.canEditAll === true);
+	const perms = computed(() => getPermsSafe());
+	const canEdit = computed(() => perms.value?.canEditCategorias === true || perms.value?.canEditAll === true);
 
-	const API_BASE = "https://localhost:7198";
-	const CATEGORIES_ENDPOINT = `${API_BASE}/api/Categorias`;
-	const PRODUCTS_ENDPOINT = `${API_BASE}/api/Productos`;
+	const CATS_ENDPOINT = "/api/Categorias";
 
-	const search = ref("");
+	const searchQ = ref("");
+	const loading = ref(false);
+	const loadError = ref("");
+
 	const isOpen = ref(false);
 	const saving = ref(false);
-	const loading = ref(false);
 	const apiError = ref("");
 
 	const mode = ref("create");
@@ -136,150 +137,67 @@
 
 	const rows = ref([]);
 
-	const productos = ref([]);
-	const productosLoading = ref(false);
-	const productosError = ref("");
-
-	const emptyForm = () => ({
-		idCategoria: null,
-		nombre: "",
-		descripcion: "",
-	});
+	const emptyForm = () => ({ nombre: "", descripcion: "" });
 	const form = reactive(emptyForm());
 
-	onMounted(async () => {
-		await loadAll();
-	});
+	onMounted(loadCategorias);
 
-	function normalizeList(data) {
-		if (Array.isArray(data)) return data;
-		if (Array.isArray(data?.$values)) return data.$values;
-		if (Array.isArray(data?.items)) return data.items;
-		if (Array.isArray(data?.data)) return data.data;
-		if (Array.isArray(data?.result)) return data.result;
-		if (Array.isArray(data?.value)) return data.value;
-		if (Array.isArray(data?.results)) return data.results;
-		return [];
+	function rowKey(c) {
+		return String(c?.idCategoria ?? c?.IdCategoria ?? c?.nombre ?? `${Math.random()}`);
 	}
 
-	function normalizeCategoria(c) {
-		const idCategoria =
-			c?.idCategoria ??
-			c?.IdCategoria ??
-			c?.categoriaId ??
-			c?.CategoriaId ??
-			c?.id ??
-			c?.Id ??
-			null;
+	function normalizeCat(c) {
+		const idCategoria = c?.idCategoria ?? c?.IdCategoria ?? c?.id ?? c?.Id ?? null;
+		const nombre = c?.nombre ?? c?.Nombre ?? "";
+		const descripcion = c?.descripcion ?? c?.Descripcion ?? null;
 
 		return {
 			...c,
 			idCategoria: idCategoria != null ? Number(idCategoria) : null,
-			nombre: String(c?.nombre ?? c?.Nombre ?? c?.name ?? "").trim(),
-			descripcion: String(c?.descripcion ?? c?.Descripcion ?? "").trim(),
+			nombre: String(nombre ?? "").trim(),
+			descripcion: descripcion == null ? "" : String(descripcion).trim(),
 		};
 	}
 
-	function normalizeProducto(p) {
-		const idCategoria =
-			p?.idCategoria ??
-			p?.IdCategoria ??
-			p?.categoriaId ??
-			p?.CategoriaId ??
-			p?.idCategoriaFk ??
-			p?.IdCategoriaFk ??
-			p?.categoria?.idCategoria ??
-			p?.categoria?.IdCategoria ??
-			p?.Categoria?.idCategoria ??
-			p?.Categoria?.IdCategoria ??
-			null;
-
-		return {
-			...p,
-			idCategoria: idCategoria != null ? Number(idCategoria) : null,
-		};
+	function normalizeList(data) {
+		if (Array.isArray(data)) return data.map(normalizeCat);
+		if (Array.isArray(data?.$values)) return data.$values.map(normalizeCat);
+		if (Array.isArray(data?.items)) return data.items.map(normalizeCat);
+		if (Array.isArray(data?.data)) return data.data.map(normalizeCat);
+		if (Array.isArray(data?.result)) return data.result.map(normalizeCat);
+		if (Array.isArray(data?.value)) return data.value.map(normalizeCat);
+		if (Array.isArray(data?.results)) return data.results.map(normalizeCat);
+		return [];
 	}
 
-	async function loadAll() {
+	async function loadCategorias() {
 		loading.value = true;
-		apiError.value = "";
+		loadError.value = "";
 		try {
-			await Promise.all([loadCategories(), loadProductos()]);
+			const data = await apiFetch(CATS_ENDPOINT);
+			rows.value = normalizeList(data);
 		} catch (e) {
-			apiError.value = e?.message ?? "Error cargando datos desde la API.";
+			loadError.value = e?.message ?? "Failed to fetch.";
+			rows.value = [];
 		} finally {
 			loading.value = false;
 		}
 	}
 
-	async function loadCategories() {
-		try {
-			const res = await fetch(CATEGORIES_ENDPOINT);
-			if (!res.ok) throw new Error(`GET /api/Categorias falló (${res.status})`);
-			const data = await res.json();
-			const list = normalizeList(data);
-
-			rows.value = list.map(normalizeCategoria);
-		} catch (e) {
-			rows.value = [];
-			throw e;
-		}
-	}
-
-	async function loadProductos() {
-		productosLoading.value = true;
-		productosError.value = "";
-		try {
-			const res = await fetch(PRODUCTS_ENDPOINT);
-			if (!res.ok) throw new Error(`GET /api/Productos falló (${res.status})`);
-			const data = await res.json();
-			const list = normalizeList(data);
-
-			productos.value = list.map(normalizeProducto);
-		} catch (e) {
-			productos.value = [];
-			productosError.value = e?.message ?? "No se pudieron cargar productos.";
-		} finally {
-			productosLoading.value = false;
-		}
-	}
-
-	function rowKey(c) {
-		return String(c?.idCategoria ?? c?.nombre ?? Math.random());
-	}
-
-	const productosCountMap = computed(() => {
-		const map = new Map();
-		for (const p of productos.value) {
-			const idCat = p?.idCategoria;
-			if (idCat == null) continue;
-			map.set(idCat, (map.get(idCat) ?? 0) + 1);
-		}
-		return map;
-	});
-
-	function productosCount(c) {
-		if (typeof c?.productosCount === "number") return c.productosCount;
-		if (typeof c?.totalProductos === "number") return c.totalProductos;
-		if (Array.isArray(c?.productos)) return c.productos.length;
-
-		const id = c?.idCategoria != null ? Number(c.idCategoria) : null;
-		if (!id) return 0;
-
-		return productosCountMap.value.get(id) ?? 0;
-	}
-
 	const filteredRows = computed(() => {
-		const q = search.value.trim().toLowerCase();
+		const q = searchQ.value.trim().toLowerCase();
 		if (!q) return rows.value;
-
 		return rows.value.filter((c) => {
 			return (
-				String(c?.nombre ?? "").toLowerCase().includes(q) ||
-				String(c?.descripcion ?? "").toLowerCase().includes(q)
+				String(c.nombre ?? "").toLowerCase().includes(q) ||
+				String(c.descripcion ?? "").toLowerCase().includes(q)
 			);
 		});
 	});
+
+	function productosCount(c) {
+		return Number(c?.productos ?? c?.Productos ?? c?.productosCount ?? c?.ProductosCount ?? 0);
+	}
 
 	function openCreate() {
 		if (!canEdit.value) return;
@@ -293,21 +211,22 @@
 	function openEdit(c) {
 		if (!canEdit.value) return;
 		apiError.value = "";
-		const id = c?.idCategoria ?? null;
+		mode.value = "edit";
+
+		const id = c?.idCategoria ?? c?.IdCategoria ?? null;
 		if (!id) {
-			apiError.value = "Este registro no tiene idCategoria. Verifica que el GET /api/Categorias devuelva idCategoria.";
+			apiError.value = "Este registro no tiene 'idCategoria'.";
+			editingIdCategoria.value = null;
+			Object.assign(form, emptyForm(), normalizeCat(c));
+			isOpen.value = true;
 			return;
 		}
 
-		mode.value = "edit";
-		editingIdCategoria.value = id;
-
+		editingIdCategoria.value = Number(id);
 		Object.assign(form, emptyForm(), {
-			idCategoria: id,
-			nombre: c?.nombre ?? "",
-			descripcion: c?.descripcion ?? "",
+			nombre: c?.nombre ?? c?.Nombre ?? "",
+			descripcion: c?.descripcion ?? c?.Descripcion ?? "",
 		});
-
 		isOpen.value = true;
 	}
 
@@ -320,57 +239,23 @@
 		return "";
 	}
 
-	async function readApiError(res) {
-		let msg = `Error (${res.status}).`;
-		try {
-			const ct = res.headers.get("content-type") || "";
-			if (ct.includes("application/json")) {
-				const data = await res.json();
-				msg = data.message || data.msg || data.error || data.title || JSON.stringify(data);
-			} else {
-				msg = await res.text();
-			}
-		} catch { }
-		return new Error(msg);
-	}
-
 	async function saveCategory() {
 		if (!canEdit.value) return;
+
 		apiError.value = "";
 		const err = validate();
-		if (err) {
-			apiError.value = err;
-			return;
-		}
+		if (err) { apiError.value = err; return; }
 
 		saving.value = true;
 		try {
 			const payload = {
-				nombre: form.nombre,
-				descripcion: form.descripcion,
+				nombre: String(form.nombre ?? "").trim(),
+				descripcion: String(form.descripcion ?? "").trim() || null,
 			};
 
 			if (mode.value === "create") {
-				const res = await fetch(CATEGORIES_ENDPOINT, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify(payload),
-				});
-				if (!res.ok) throw await readApiError(res);
-
-				let created = null;
-				try {
-					created = await res.json();
-				} catch {
-					created = null;
-				}
-
-				if (!created || !(created.idCategoria || created.IdCategoria || created.id || created.Id)) {
-					await loadCategories();
-				} else {
-					rows.value.unshift(normalizeCategoria(created));
-				}
-
+				await apiFetch(CATS_ENDPOINT, { method: "POST", body: JSON.stringify(payload) });
+				await loadCategorias();
 				closeModal();
 				return;
 			}
@@ -380,30 +265,9 @@
 				return;
 			}
 
-			const url = `${CATEGORIES_ENDPOINT}/${encodeURIComponent(editingIdCategoria.value)}`;
-			const res = await fetch(url, {
-				method: "PUT",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload),
-			});
-			if (!res.ok) throw await readApiError(res);
-
-			if (res.status === 204) {
-				await loadCategories();
-				closeModal();
-				return;
-			}
-
-			let updated = null;
-			try {
-				updated = await res.json();
-			} catch {
-				updated = { ...payload, idCategoria: editingIdCategoria.value };
-			}
-
-			const idx = rows.value.findIndex((r) => Number(r?.idCategoria) === Number(editingIdCategoria.value));
-			if (idx !== -1) rows.value[idx] = { ...rows.value[idx], ...normalizeCategoria(updated), ...payload };
-
+			const url = `${CATS_ENDPOINT}/${encodeURIComponent(editingIdCategoria.value)}`;
+			await apiFetch(url, { method: "PUT", body: JSON.stringify(payload) });
+			await loadCategorias();
 			closeModal();
 		} catch (e) {
 			apiError.value = e?.message ?? "Error guardando la categoría.";
@@ -414,22 +278,17 @@
 
 	async function removeCategory(c) {
 		if (!canEdit.value) return;
-		const id = c?.idCategoria ?? null;
-		const name = c?.nombre ?? "esta categoría";
 
-		if (!id) {
-			alert("Este registro no tiene idCategoria. DELETE requiere /api/Categorias/{id}.");
-			return;
-		}
+		const id = c?.idCategoria ?? c?.IdCategoria ?? null;
+		const name = c?.nombre ?? c?.Nombre ?? "esta categoría";
 
+		if (!id) return;
 		if (!confirm(`¿Seguro que deseas eliminar ${name}?`)) return;
 
 		try {
-			const url = `${CATEGORIES_ENDPOINT}/${encodeURIComponent(id)}`;
-			const res = await fetch(url, { method: "DELETE" });
-			if (!res.ok) throw await readApiError(res);
-
-			rows.value = rows.value.filter((r) => Number(r?.idCategoria) !== Number(id));
+			const url = `${CATS_ENDPOINT}/${encodeURIComponent(id)}`;
+			await apiFetch(url, { method: "DELETE" });
+			rows.value = rows.value.filter((x) => Number(x?.idCategoria) !== Number(id));
 		} catch (e) {
 			alert(e?.message ?? "No se pudo eliminar.");
 		}

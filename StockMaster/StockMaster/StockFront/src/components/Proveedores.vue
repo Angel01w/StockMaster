@@ -18,12 +18,10 @@
 				</button>
 			</div>
 
-			<!-- Error global de carga -->
 			<div v-if="loadError" class="alert">
 				{{ loadError }}
 			</div>
 
-			<!-- Buscador -->
 			<div class="search">
 				<div class="search-ic">
 					<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -34,15 +32,12 @@
 				<input v-model="searchQ" class="search-in" placeholder="Buscar proveedores..." />
 			</div>
 
-			<!-- Loading -->
 			<div v-if="loading" class="mutedLine">Cargando proveedores...</div>
 
-			<!-- Empty -->
 			<div v-else-if="filteredProviders.length === 0" class="mutedLine">
 				No hay proveedores para mostrar.
 			</div>
 
-			<!-- Cards -->
 			<div v-else class="grid">
 				<div class="card" v-for="p in filteredProviders" :key="rowKey(p)">
 					<div class="card-top">
@@ -100,7 +95,6 @@
 				</div>
 			</div>
 
-			<!-- DRAWER -->
 			<div v-if="isOpen && canEdit" class="overlay" @click.self="closeModal">
 				<div class="drawer" role="dialog" aria-modal="true">
 					<div class="drawer-head">
@@ -151,7 +145,6 @@
 					</div>
 				</div>
 			</div>
-			<!-- /DRAWER -->
 		</div>
 	</div>
 </template>
@@ -160,16 +153,13 @@
 	import { computed, onMounted, reactive, ref } from "vue";
 	import { getUser } from "../router/auth.service";
 	import { getPermsSafe } from "../services/permissions";
+	import { apiFetch } from "../services/api";
 
 	const user = computed(() => getUser());
 	const perms = computed(() => getPermsSafe(user.value));
 	const canEdit = computed(() => perms.value?.canEditProveedores === true || perms.value?.canEditAll === true);
 
-	// ✅ AJUSTA si tu backend corre en otro puerto / dominio
-	const API_BASE = "https://localhost:7198";
-
-	// ✅ Según tu Swagger: /api/Proveedores
-	const PROVIDERS_ENDPOINT = `${API_BASE}/api/Proveedores`;
+	const PROVIDERS_ENDPOINT = "/api/Proveedores";
 
 	const searchQ = ref("");
 	const loading = ref(false);
@@ -179,7 +169,7 @@
 	const saving = ref(false);
 	const apiError = ref("");
 
-	const mode = ref("create"); // create | edit
+	const mode = ref("create");
 	const editingIdProveedor = ref(null);
 
 	const providers = ref([]);
@@ -252,47 +242,14 @@
 		return [];
 	}
 
-	async function readApiError(res) {
-		let text = "";
-		try {
-			const ct = res.headers.get("content-type") || "";
-			if (ct.includes("application/json")) {
-				const data = await res.json();
-				text =
-					data?.message ||
-					data?.msg ||
-					data?.error ||
-					data?.title ||
-					JSON.stringify(data);
-			} else {
-				text = await res.text();
-			}
-		} catch { /* ignore */ }
-
-		const msg = text?.trim()
-			? `${res.status} ${res.statusText}: ${text}`
-			: `${res.status} ${res.statusText}`;
-
-		return new Error(msg);
-	}
-
 	async function loadProviders() {
 		loading.value = true;
 		loadError.value = "";
 		try {
-			const res = await fetch(PROVIDERS_ENDPOINT);
-			if (!res.ok) throw await readApiError(res);
-
-			if (res.status === 204) {
-				providers.value = [];
-				return;
-			}
-
-			const data = await res.json();
+			const data = await apiFetch(PROVIDERS_ENDPOINT);
 			providers.value = normalizeList(data);
 		} catch (e) {
-			// ✅ SIN FALLBACK: solo error
-			loadError.value = e?.message ?? "Failed to fetch (revisa API_BASE, certificado HTTPS o CORS).";
+			loadError.value = e?.message ?? "Failed to fetch.";
 			providers.value = [];
 		} finally {
 			loading.value = false;
@@ -332,7 +289,7 @@
 
 		const id = p?.idProveedor ?? p?.IdProveedor ?? null;
 		if (!id) {
-			apiError.value = "Este registro no tiene 'idProveedor'. La API debe devolver idProveedor para poder editar/eliminar.";
+			apiError.value = "Este registro no tiene 'idProveedor'.";
 			editingIdProveedor.value = null;
 			Object.assign(form, emptyForm(), normalizeProvider(p));
 			isOpen.value = true;
@@ -378,56 +335,21 @@
 				direccion: String(form.direccion ?? "").trim(),
 			};
 
-			// CREATE
 			if (mode.value === "create") {
-				const res = await fetch(PROVIDERS_ENDPOINT, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify(payload),
-				});
-				if (!res.ok) throw await readApiError(res);
-
-				let created = null;
-				try { created = await res.json(); } catch { created = null; }
-
-				if (created) providers.value.unshift(normalizeProvider(created));
-				else await loadProviders();
-
+				await apiFetch(PROVIDERS_ENDPOINT, { method: "POST", body: JSON.stringify(payload) });
+				await loadProviders();
 				closeModal();
 				return;
 			}
 
-			// EDIT
 			if (!editingIdProveedor.value) {
-				apiError.value = "No hay idProveedor para editar. Verifica que GET /api/Proveedores devuelva idProveedor.";
+				apiError.value = "No hay idProveedor para editar.";
 				return;
 			}
 
 			const url = `${PROVIDERS_ENDPOINT}/${encodeURIComponent(editingIdProveedor.value)}`;
-			const res = await fetch(url, {
-				method: "PUT",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload),
-			});
-			if (!res.ok) throw await readApiError(res);
-
-			// Muchas APIs retornan 204 NoContent: en ese caso recargamos
-			if (res.status === 204) {
-				await loadProviders();
-				closeModal();
-				return;
-			}
-
-			let updated = null;
-			try { updated = await res.json(); } catch { updated = null; }
-
-			if (updated) {
-				const idx = providers.value.findIndex((x) => Number(x?.idProveedor) === Number(editingIdProveedor.value));
-				if (idx !== -1) providers.value[idx] = normalizeProvider({ ...providers.value[idx], ...updated, ...payload });
-			} else {
-				await loadProviders();
-			}
-
+			await apiFetch(url, { method: "PUT", body: JSON.stringify(payload) });
+			await loadProviders();
 			closeModal();
 		} catch (e) {
 			apiError.value = e?.message ?? "Error guardando el proveedor.";
@@ -443,7 +365,7 @@
 		const name = p?.nombreEmpresa ?? p?.NombreEmpresa ?? "este proveedor";
 
 		if (!id) {
-			alert("Este registro no tiene 'idProveedor'. DELETE requiere /api/Proveedores/{id}.");
+			alert("Este registro no tiene 'idProveedor'.");
 			return;
 		}
 
@@ -451,9 +373,7 @@
 
 		try {
 			const url = `${PROVIDERS_ENDPOINT}/${encodeURIComponent(id)}`;
-			const res = await fetch(url, { method: "DELETE" });
-			if (!res.ok) throw await readApiError(res);
-
+			await apiFetch(url, { method: "DELETE" });
 			providers.value = providers.value.filter((x) => Number(x?.idProveedor) !== Number(id));
 		} catch (e) {
 			alert(e?.message ?? "No se pudo eliminar.");
@@ -462,7 +382,6 @@
 </script>
 
 <style scoped>
-	/* tu mismo CSS, solo agregué .mutedBadge */
 	.page {
 		min-height: 100vh;
 		background: #eef3ff;

@@ -11,15 +11,12 @@ namespace StockMaster.Domain.Entities
         public int IdCategoria { get; set; }
 
         [Required]
-        [MaxLength(80)]
+        [MaxLength(120)]
         public string Nombre { get; set; } = string.Empty;
 
         [MaxLength(255)]
         public string? Descripcion { get; set; }
 
-        [Required]
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-        public DateTime? UpdatedAt { get; set; }
+        public int? CreatedByUserId { get; set; }
     }
 }

@@ -3,16 +3,38 @@ import { normalizeRole, getPerms, roleLabel } from "../services/permissions";
 
 const API_BASE = "https://localhost:7198";
 
-const TOKEN_KEY = "sm_token";
-const USER_KEY = "sm_user";
+const TOKEN_KEY = "token";
+const USER_KEY = "user";
+
+const LEGACY_TOKEN_KEYS = ["sm_token", "access_token", "jwt", "bearer"];
+const LEGACY_USER_KEYS = ["sm_user"];
+
+function pickFirst(keys) {
+    for (const k of keys) {
+        const v = localStorage.getItem(k);
+        if (v && String(v).trim() !== "") return v;
+    }
+    return "";
+}
 
 function pickToken() {
-    return localStorage.getItem(TOKEN_KEY) || localStorage.getItem("token") || "";
+    return pickFirst([TOKEN_KEY, ...LEGACY_TOKEN_KEYS]);
+}
+
+function pickUserRaw() {
+    return pickFirst([USER_KEY, ...LEGACY_USER_KEYS]);
 }
 
 function saveSession(token, user) {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    if (user !== undefined) localStorage.setItem(USER_KEY, JSON.stringify(user));
+    if (token && String(token).trim() !== "") {
+        localStorage.setItem(TOKEN_KEY, token);
+        localStorage.setItem("sm_token", token);
+    }
+    if (user !== undefined) {
+        const raw = typeof user === "string" ? user : JSON.stringify(user);
+        localStorage.setItem(USER_KEY, raw);
+        localStorage.setItem("sm_user", raw);
+    }
 }
 
 function safeJson(v) {
@@ -20,7 +42,7 @@ function safeJson(v) {
     if (typeof v === "string") {
         try {
             return JSON.parse(v);
-        } catch (e) {
+        } catch {
             return {};
         }
     }
@@ -82,7 +104,19 @@ function buildUser(data, body) {
         get(userObj, "idArea"),
         get(userObj, "IdArea")
     );
-    const areaIdVal = areaId === "" ? null : areaId;
+    const areaIdVal = areaId === "" ? null : Number(areaId);
+
+    const proveedorId = firstNonEmpty(
+        get(data, "proveedorId"),
+        get(data, "ProveedorId"),
+        get(data, "idProveedor"),
+        get(data, "IdProveedor"),
+        get(userObj, "proveedorId"),
+        get(userObj, "ProveedorId"),
+        get(userObj, "idProveedor"),
+        get(userObj, "IdProveedor")
+    );
+    const proveedorIdVal = proveedorId === "" ? null : Number(proveedorId);
 
     const idUsuario = firstNonEmpty(
         get(data, "idUsuario"),
@@ -94,7 +128,7 @@ function buildUser(data, body) {
         get(userObj, "id"),
         get(userObj, "userId")
     );
-    const idUsuarioVal = idUsuario === "" ? null : idUsuario;
+    const idUsuarioVal = idUsuario === "" ? null : Number(idUsuario);
 
     const nombreCompleto = firstNonEmpty(
         get(data, "nombreCompleto"),
@@ -136,6 +170,7 @@ function buildUser(data, body) {
         roleLabel: roleLabel(role),
         perms: getPerms(role),
         areaId: areaIdVal,
+        proveedorId: proveedorIdVal,
     };
 }
 
@@ -147,69 +182,52 @@ function authHeaders(extra) {
 }
 
 export async function login(payload) {
-    try {
-        const loginValue = firstNonEmpty(
-            payload && payload.Login,
-            payload && payload.Username,
-            payload && payload.username,
-            payload && payload.Email,
-            payload && payload.email,
-            payload && payload.login,
-            payload && payload.user
-        );
+    const loginValue = firstNonEmpty(
+        payload && payload.Login,
+        payload && payload.Username,
+        payload && payload.username,
+        payload && payload.Email,
+        payload && payload.email,
+        payload && payload.login,
+        payload && payload.user
+    );
 
-        const passValue = firstNonEmpty(payload && payload.Password, payload && payload.password);
+    const passValue = firstNonEmpty(payload && payload.Password, payload && payload.password);
 
-        if (!loginValue || !passValue) {
-            throw new Error(
-                'Faltan credenciales. login="' +
-                String(loginValue || "") +
-                '" password=' +
-                (passValue ? "***" : "(vacío)")
-            );
-        }
-
-        const body = { Login: String(loginValue).trim(), Password: String(passValue) };
-
-        const res = await axios.post(API_BASE + "/api/Auth/login", body, {
-            headers: { "Content-Type": "application/json" },
-        });
-
-        const data = safeJson(res && res.data);
-
-        const token = extractToken(data);
-        if (!token) throw new Error("No se recibió token del servidor.");
-
-        const user = buildUser(data, body);
-        saveSession(token, user);
-
-        const out = {};
-        if (data && typeof data === "object") {
-            for (const k in data) out[k] = data[k];
-        }
-        out.token = token;
-        out.user = user;
-
-        return out;
-    } catch (err) {
-        const e = err;
-        const resp = e && e.response ? e.response : null;
-
-        console.error("LOGIN ERROR:", {
-            status: resp ? resp.status : undefined,
-            data: resp ? resp.data : undefined,
-            msg: e && e.message ? e.message : "Unknown error",
-        });
-
-        throw err;
+    if (!loginValue || !passValue) {
+        throw new Error("Faltan credenciales.");
     }
+
+    const body = { Login: String(loginValue).trim(), Password: String(passValue) };
+
+    const res = await axios.post(API_BASE + "/api/Auth/login", body, {
+        headers: { "Content-Type": "application/json" },
+    });
+
+    const data = safeJson(res && res.data);
+
+    const token = extractToken(data);
+    if (!token) throw new Error("No se recibió token del servidor.");
+
+    const user = buildUser(data, body);
+    saveSession(token, user);
+
+    const out = {};
+    if (data && typeof data === "object") {
+        for (const k in data) out[k] = data[k];
+    }
+    out.token = token;
+    out.user = user;
+
+    return out;
 }
 
 export function logout() {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+
+    for (const k of LEGACY_TOKEN_KEYS) localStorage.removeItem(k);
+    for (const k of LEGACY_USER_KEYS) localStorage.removeItem(k);
 }
 
 export function getToken() {
@@ -222,10 +240,10 @@ export function isAuthenticated() {
 
 export function getUser() {
     try {
-        const raw = localStorage.getItem(USER_KEY);
+        const raw = pickUserRaw();
         if (!raw) return null;
 
-        const u = JSON.parse(raw);
+        const u = safeJson(raw);
         const role = normalizeRole(firstNonEmpty(u && (u.role || u.rol || u.Role || u.Rol)));
 
         const out = {};
@@ -237,8 +255,9 @@ export function getUser() {
         out.perms = (u && u.perms) ? u.perms : getPerms(role);
 
         return out;
-    } catch (e) {
+    } catch {
         localStorage.removeItem(USER_KEY);
+        localStorage.removeItem("sm_user");
         return null;
     }
 }

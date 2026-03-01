@@ -115,6 +115,22 @@ public class MovimientosController : ControllerBase
         return null;
     }
 
+    private async Task<int?> ResolveProveedorIdOrNullAsync()
+    {
+        if (IsAdmin() || IsAuditor()) return null;
+
+        var userId = GetUserId();
+
+        var prov = await _db.Usuarios
+            .AsNoTracking()
+            .Where(u => u.IdUsuario == userId)
+            .Select(u => (int?)u.IdProveedor)
+            .FirstOrDefaultAsync();
+
+        if (prov.HasValue && prov.Value > 0) return prov.Value;
+        return null;
+    }
+
     [HttpGet]
     public async Task<ActionResult<List<MovimientoReadDto>>> GetAll(
         [FromQuery] DateTime? desde,
@@ -125,10 +141,11 @@ public class MovimientosController : ControllerBase
         [FromQuery] int? usuarioId
     )
     {
+        var proveedorId = await ResolveProveedorIdOrNullAsync();
         var areaId = await ResolveAreaIdOrNullAsync();
 
-        if (!areaId.HasValue && !IsAdmin() && !IsAuditor())
-            return Unauthorized("Token sin IdArea/AreaId válido.");
+        if (!IsAdmin() && !IsAuditor() && !proveedorId.HasValue)
+            return Unauthorized("Usuario sin IdProveedor asignado.");
 
         var q =
             from m in _db.MovimientosInventario.AsNoTracking()
@@ -145,8 +162,11 @@ public class MovimientosController : ControllerBase
                 UsuarioNombre = u != null ? (u.Username ?? "") : ""
             };
 
-        if (areaId.HasValue && !IsAdmin() && !IsAuditor())
-            q = q.Where(x => x.p.IdArea == areaId.Value);
+        if (!IsAdmin() && !IsAuditor())
+        {
+            q = q.Where(x => x.p.IdProveedor == proveedorId.Value);
+            if (areaId.HasValue) q = q.Where(x => x.p.IdArea == areaId.Value);
+        }
 
         if (desde.HasValue) q = q.Where(x => x.m.Fecha >= desde.Value);
         if (hasta.HasValue) q = q.Where(x => x.m.Fecha <= hasta.Value);
@@ -177,11 +197,11 @@ public class MovimientosController : ControllerBase
     {
         if (IsAuditor()) return Forbid();
 
-        var areaId = await ResolveAreaIdOrNullAsync();
+        var proveedorId = await ResolveProveedorIdOrNullAsync();
         var userId = GetUserId();
 
-        if (!areaId.HasValue && !IsAdmin() && !IsAuditor())
-            return Unauthorized("Token sin IdArea/AreaId válido.");
+        if (!IsAdmin() && !IsAuditor() && !proveedorId.HasValue)
+            return Unauthorized("Usuario sin IdProveedor asignado.");
 
         if (dto.IdProducto <= 0) return BadRequest("IdProducto inválido.");
         if (string.IsNullOrWhiteSpace(dto.Tipo)) return BadRequest("Tipo es obligatorio.");
@@ -196,8 +216,10 @@ public class MovimientosController : ControllerBase
         var producto = await _db.Productos.FirstOrDefaultAsync(p => p.IdProducto == dto.IdProducto);
         if (producto is null) return NotFound("Producto no existe.");
 
-        if (areaId.HasValue && !IsAdmin() && !IsAuditor() && producto.IdArea != areaId.Value)
-            return Forbid();
+        if (!IsAdmin() && !IsAuditor())
+        {
+            if (producto.IdProveedor != proveedorId.Value) return Forbid();
+        }
 
         if (string.Equals(tipo, "Salida", StringComparison.OrdinalIgnoreCase) && producto.StockActual < dto.Cantidad)
             return BadRequest("Stock insuficiente.");

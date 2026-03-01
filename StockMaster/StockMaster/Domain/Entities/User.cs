@@ -40,9 +40,11 @@ namespace StockMaster.Domain.Entities
 
         public DateTime? UpdatedAt { get; set; }
 
-      
         [Column("AreaId")]
         public int? AreaId { get; set; }
+
+        [Column("IdProveedor")]
+        public int? IdProveedor { get; set; }
 
         public Role? Role { get; set; }
     }

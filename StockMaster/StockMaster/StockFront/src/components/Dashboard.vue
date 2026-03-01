@@ -350,10 +350,11 @@
         let tipo = m ? (m.tipo || m.Tipo || m.tipoMovimiento || m.movementType || "Entrada") : "Entrada";
         if (typeof tipo === "number") tipo = tipo === 1 ? "Entrada" : "Salida";
         if (typeof tipo === "string") {
-            const t = tipo.toLowerCase();
-            if (t.indexOf("e") === 0) tipo = "Entrada";
-            else if (t.indexOf("s") === 0) tipo = "Salida";
-            else if (t === "entrada" || t === "salida") tipo = t[0].toUpperCase() + t.slice(1);
+            const t = tipo.toLowerCase().trim();
+            if (t === "entrada") tipo = "Entrada";
+            else if (t === "salida") tipo = "Salida";
+            else if (t.startsWith("e")) tipo = "Entrada";
+            else if (t.startsWith("s")) tipo = "Salida";
         }
 
         const idProducto = Number(m ? (m.idProducto || m.IdProducto || m.productoId || 0) : 0) || null;
@@ -471,14 +472,17 @@
         const totalProds = productos.value.length;
 
         const now = new Date();
-        const from = new Date(now.getFullYear(), now.getMonth(), 1);
+        const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+        const end = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
 
-        const inMes = movimientosRaw.value
-            .filter((x) => x._dt && x._dt >= from && x.tipo === "Entrada")
+        const movsMes = movimientosRaw.value.filter((x) => x._dt && !isNaN(x._dt.getTime()) && x._dt >= start && x._dt < end);
+
+        const inMes = movsMes
+            .filter((x) => (x.tipo || "").toLowerCase() === "entrada")
             .reduce((a, x) => a + toNumber(x.cantidad, 0), 0);
 
-        const outMes = movimientosRaw.value
-            .filter((x) => x._dt && x._dt >= from && x.tipo === "Salida")
+        const outMes = movsMes
+            .filter((x) => (x.tipo || "").toLowerCase() === "salida")
             .reduce((a, x) => a + toNumber(x.cantidad, 0), 0);
 
         const lowCount = productos.value.filter((p) => p.minimo > 0 && p.stock <= p.minimo).length;
@@ -524,8 +528,8 @@
             const k = monthKey(new Date(mv._dt.getFullYear(), mv._dt.getMonth(), 1));
             if (bucketsIn[k] === undefined) continue;
 
-            if (mv.tipo === "Entrada") bucketsIn[k] += toNumber(mv.cantidad, 0);
-            else bucketsOut[k] += toNumber(mv.cantidad, 0);
+            if ((mv.tipo || "").toLowerCase() === "entrada") bucketsIn[k] += toNumber(mv.cantidad, 0);
+            else if ((mv.tipo || "").toLowerCase() === "salida") bucketsOut[k] += toNumber(mv.cantidad, 0);
         }
 
         months.value = labels;

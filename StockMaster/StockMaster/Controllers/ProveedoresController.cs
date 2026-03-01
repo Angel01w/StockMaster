@@ -1,70 +1,110 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StockMaster.Domain.Entities;
 using StockMaster.Infrastructure.Data;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
 
 namespace StockMaster.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class ProveedoresController : ControllerBase
 {
     private readonly AppDbContext _db;
     public ProveedoresController(AppDbContext db) => _db = db;
 
-    [HttpGet]
-    public async Task<ActionResult<List<Proveedor>>> GetAll([FromQuery] string? search)
+    private int GetUserId()
     {
+        var raw =
+            User.FindFirst(ClaimTypes.NameIdentifier)?.Value ??
+            User.FindFirst("idUsuario")?.Value ??
+            User.FindFirst("IdUsuario")?.Value;
+
+        if (string.IsNullOrWhiteSpace(raw) || !int.TryParse(raw, out var id) || id <= 0)
+            throw new InvalidOperationException("Token sin IdUsuario válido.");
+
+        return id;
+    }
+
+    private string GetRole()
+    {
+        return
+            User.FindFirst(ClaimTypes.Role)?.Value ??
+            User.FindFirst("role")?.Value ??
+            User.FindFirst("Role")?.Value ??
+            User.FindFirst("rol")?.Value ??
+            User.FindFirst("Rol")?.Value ??
+            "";
+    }
+
+    private bool IsAdmin() => string.Equals(GetRole(), "Admin", StringComparison.OrdinalIgnoreCase);
+    private bool IsAuditor() => string.Equals(GetRole(), "Auditor", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<int?> ResolveProveedorIdOrNullAsync()
+    {
+        if (IsAdmin() || IsAuditor()) return null;
+
+        var raw =
+            User.FindFirst("IdProveedor")?.Value ??
+            User.FindFirst("idProveedor")?.Value ??
+            User.FindFirst("ProveedorId")?.Value ??
+            User.FindFirst("proveedorId")?.Value;
+
+        if (!string.IsNullOrWhiteSpace(raw) && int.TryParse(raw, out var fromToken) && fromToken > 0)
+            return fromToken;
+
+        var userId = GetUserId();
+
+        var fromUser = await _db.Usuarios
+            .AsNoTracking()
+            .Where(u => u.IdUsuario == userId)
+            .Select(u => (int?)u.IdProveedor)
+            .FirstOrDefaultAsync();
+
+        if (fromUser.HasValue && fromUser.Value > 0)
+            return fromUser.Value;
+
+        return null;
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<List<Proveedor>>> GetAll()
+    {
+        var proveedorId = await ResolveProveedorIdOrNullAsync();
+
         var q = _db.Proveedores.AsNoTracking().AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(search))
-            q = q.Where(x =>
-                x.NombreEmpresa.Contains(search) ||
-                (x.PersonaContacto != null && x.PersonaContacto.Contains(search)) ||
-                (x.Email != null && x.Email.Contains(search)));
+        if (!IsAdmin() && !IsAuditor())
+        {
+            if (!proveedorId.HasValue) return Ok(new List<Proveedor>());
+            q = q.Where(p => p.IdProveedor == proveedorId.Value);
+        }
 
-        return await q.OrderBy(x => x.NombreEmpresa).ToListAsync();
+        var list = await q.OrderBy(x => x.NombreEmpresa).ToListAsync();
+        return list;
     }
 
     [HttpGet("{id:int}")]
     public async Task<ActionResult<Proveedor>> GetById(int id)
     {
-        var item = await _db.Proveedores.AsNoTracking().FirstOrDefaultAsync(x => x.IdProveedor == id);
-        return item is null ? NotFound() : Ok(item);
-    }
+        var proveedorId = await ResolveProveedorIdOrNullAsync();
 
-    [HttpPost]
-    public async Task<ActionResult<Proveedor>> Create(Proveedor proveedor)
-    {
-        _db.Proveedores.Add(proveedor);
-        await _db.SaveChangesAsync();
-        return CreatedAtAction(nameof(GetById), new { id = proveedor.IdProveedor }, proveedor);
-    }
+        var q = _db.Proveedores.AsNoTracking().Where(x => x.IdProveedor == id);
 
-    [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, Proveedor dto)
-    {
-        var item = await _db.Proveedores.FirstOrDefaultAsync(x => x.IdProveedor == id);
+        if (!IsAdmin() && !IsAuditor())
+        {
+            if (!proveedorId.HasValue) return NotFound();
+            q = q.Where(x => x.IdProveedor == proveedorId.Value);
+        }
+
+        var item = await q.FirstOrDefaultAsync();
         if (item is null) return NotFound();
-
-        item.NombreEmpresa = dto.NombreEmpresa;
-        item.PersonaContacto = dto.PersonaContacto;
-        item.Email = dto.Email;
-        item.Telefono = dto.Telefono;
-        item.Direccion = dto.Direccion;
-
-        await _db.SaveChangesAsync();
-        return NoContent();
-    }
-
-    [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
-    {
-        var item = await _db.Proveedores.FirstOrDefaultAsync(x => x.IdProveedor == id);
-        if (item is null) return NotFound();
-
-        _db.Proveedores.Remove(item);
-        await _db.SaveChangesAsync();
-        return NoContent();
+        return item;
     }
 }
