@@ -83,7 +83,6 @@
 						<div class="actions">
 							<button v-if="canEdit" class="icon-btn edit" type="button" title="Editar" aria-label="Editar" @click="openEdit(p)">✎</button>
 							<button v-if="canEdit" class="icon-btn del" type="button" title="Eliminar" aria-label="Eliminar" @click="removeProduct(p)">🗑</button>
-
 							<span v-if="!canEdit" class="muted">Solo lectura</span>
 						</div>
 					</div>
@@ -149,7 +148,7 @@
 
 							<div class="field">
 								<label>Proveedor</label>
-								<select v-model.number="form.idProveedor" :disabled="proveedoresLoading || !canEdit">
+								<select v-model.number="form.idProveedor" :disabled="proveedoresLoading || !canEdit || !isAdmin">
 									<option :value="0" disabled>
 										{{ proveedoresLoading ? "Cargando proveedores..." : "Seleccione un proveedor" }}
 									</option>
@@ -157,6 +156,10 @@
 										{{ p.nombreEmpresa }}
 									</option>
 								</select>
+
+								<div v-if="!isAdmin" class="miniWarn">
+									Proveedor fijo para tu usuario.
+								</div>
 
 								<div v-if="!proveedoresLoading && proveedoresLoadedOnce && proveedores.length === 0" class="miniWarn">
 									No hay proveedores registrados (api/Proveedores devolvió vacío).
@@ -219,13 +222,25 @@
 
 <script setup>
 	import { computed, onMounted, reactive, ref } from "vue";
-	import { getUser } from "../router/auth.service";
-	import { getPermsSafe } from "../services/permissions";
+	import { getUser, getPermsSafe } from "../router/auth.service";
 	import { apiFetch } from "../services/api";
 
 	const user = computed(() => getUser());
-	const perms = computed(() => getPermsSafe(user.value));
-	const canEdit = computed(() => perms.value?.canEditProductos === true || perms.value?.canEditAll === true);
+	const perms = computed(() => getPermsSafe());
+
+	const roleRaw = computed(() => String(
+		user.value?.rol ?? user.value?.Rol ?? user.value?.role ?? user.value?.Role ?? ""
+	).trim());
+
+	const isAdmin = computed(() => roleRaw.value.toLowerCase() === "admin");
+	const isAuditor = computed(() => roleRaw.value.toLowerCase() === "auditor");
+
+	const canEdit = computed(() => {
+		if (isAuditor.value) return false;
+		if (perms.value?.canEditProductos === true) return true;
+		if (perms.value?.canEditAll === true) return true;
+		return !!user.value;
+	});
 
 	const search = ref("");
 	const isOpen = ref(false);
@@ -269,7 +284,32 @@
 
 	onMounted(async () => {
 		await Promise.all([loadProducts(), loadCategorias(), loadProveedores()]);
+		fixProveedorDefault();
 	});
+
+	function getProveedorIdFromUser() {
+		const v =
+			user.value?.proveedorId ??
+			user.value?.ProveedorId ??
+			user.value?.idProveedor ??
+			user.value?.IdProveedor ??
+			null;
+		const n = Number(v ?? 0);
+		return n > 0 ? n : 0;
+	}
+
+	function fixProveedorDefault() {
+		if (isAdmin.value) return;
+		const myProv = getProveedorIdFromUser();
+		if (myProv > 0) {
+			const exists = proveedores.value.some((p) => Number(p.idProveedor) === myProv);
+			if (!exists) {
+				const label = proveedorNombre({ idProveedor: myProv }) || `ID ${myProv}`;
+				proveedores.value = [{ idProveedor: myProv, nombreEmpresa: label }];
+			}
+			form.idProveedor = myProv;
+		}
+	}
 
 	function normalizeList(data) {
 		if (Array.isArray(data)) return data;
@@ -322,8 +362,6 @@
 		const nombre =
 			x?.nombre ??
 			x?.Nombre ??
-			x?.descripcion ??
-			x?.Descripcion ??
 			x?.name ??
 			"";
 
@@ -375,7 +413,6 @@
 
 	async function fetchFirstList(paths) {
 		let lastErr = null;
-
 		for (const path of paths) {
 			try {
 				const data = await apiFetch(path);
@@ -420,12 +457,21 @@
 				"/api/Suplidores",
 				"/api/Suppliers",
 			]);
-			proveedores.value = list.map(normalizeProveedor).filter((x) => x.idProveedor != null && x.nombreEmpresa);
+
+			let normalized = list.map(normalizeProveedor).filter((x) => x.idProveedor != null && x.nombreEmpresa);
+
+			if (!isAdmin.value) {
+				const myProv = getProveedorIdFromUser();
+				if (myProv > 0) normalized = normalized.filter((p) => Number(p.idProveedor) === myProv);
+			}
+
+			proveedores.value = normalized;
 		} catch (e) {
 			proveedores.value = [];
 			proveedoresError.value = readAnyError(e);
 		} finally {
 			proveedoresLoading.value = false;
+			fixProveedorDefault();
 		}
 	}
 
@@ -505,8 +551,15 @@
 		Object.assign(form, emptyForm());
 
 		await ensureCombosLoaded();
+
 		if (categorias.value.length) form.idCategoria = Number(categorias.value[0].idCategoria);
-		if (proveedores.value.length) form.idProveedor = Number(proveedores.value[0].idProveedor);
+
+		if (isAdmin.value) {
+			if (proveedores.value.length) form.idProveedor = Number(proveedores.value[0].idProveedor);
+		} else {
+			const myProv = getProveedorIdFromUser();
+			if (myProv > 0) form.idProveedor = myProv;
+		}
 
 		isOpen.value = true;
 	}
@@ -540,6 +593,11 @@
 			stockMinimo: Number(p.stockMinimo ?? 0),
 		});
 
+		if (!isAdmin.value) {
+			const myProv = getProveedorIdFromUser();
+			if (myProv > 0) form.idProveedor = myProv;
+		}
+
 		isOpen.value = true;
 	}
 
@@ -550,7 +608,15 @@
 	function validate() {
 		if (!form.codigo || !form.nombre) return "Código y Nombre son obligatorios.";
 		if (Number(form.idCategoria) <= 0) return "Debes seleccionar una Categoría.";
-		if (Number(form.idProveedor) <= 0) return "Debes seleccionar un Proveedor.";
+
+		if (isAdmin.value) {
+			if (Number(form.idProveedor) <= 0) return "Debes seleccionar un Proveedor.";
+		} else {
+			const myProv = getProveedorIdFromUser();
+			if (myProv <= 0) return "Tu usuario no tiene IdProveedor asignado.";
+			form.idProveedor = myProv;
+		}
+
 		if (Number(form.precioCompra) < 0 || Number(form.precioVenta) < 0) return "Los precios no pueden ser negativos.";
 		if (Number(form.stockActual) < 0 || Number(form.stockMinimo) < 0) return "El stock no puede ser negativo.";
 		if (Number(form.precioVenta) < Number(form.precioCompra)) return "El Precio de Venta no puede ser menor que el Precio de Compra.";
@@ -633,7 +699,6 @@
 </script>
 
 <style scoped>
-	/* TU CSS SE QUEDA IGUAL - NO CAMBIÉ NADA AQUÍ */
 	.page {
 		min-height: 100vh;
 		background: #eef3ff;

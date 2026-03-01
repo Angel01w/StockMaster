@@ -17,7 +17,7 @@
 					</div>
 				</div>
 
-				<button v-if="canEdit" class="btn-primary" type="button" @click="openCreate">
+				<button v-if="canCreate" class="btn-primary" type="button" @click="openCreate">
 					<span class="plus">＋</span>
 					Nueva Categoría
 				</button>
@@ -118,9 +118,24 @@
 	import { getUser, getPermsSafe } from "../router/auth.service";
 	import { apiFetch } from "../services/api";
 
-	const user = computed(() => getUser());
-	const perms = computed(() => getPermsSafe());
-	const canEdit = computed(() => perms.value?.canEditCategorias === true || perms.value?.canEditAll === true);
+	const user = computed(() => getUser?.() ?? null);
+	const perms = computed(() => getPermsSafe?.() ?? null);
+
+	const role = computed(() => {
+		const u = user.value ?? {};
+		const p = perms.value ?? {};
+		return (
+			u.rol ?? u.Rol ?? u.role ?? u.Role ??
+			p.rol ?? p.Rol ?? p.role ?? p.Role ??
+			""
+		);
+	});
+
+	const isAdmin = computed(() => String(role.value || "").toLowerCase() === "admin");
+	const isAuditor = computed(() => String(role.value || "").toLowerCase() === "auditor");
+
+	const canEdit = computed(() => !isAuditor.value);
+	const canCreate = computed(() => !isAuditor.value);
 
 	const CATS_ENDPOINT = "/api/Categorias";
 
@@ -150,7 +165,6 @@
 		const idCategoria = c?.idCategoria ?? c?.IdCategoria ?? c?.id ?? c?.Id ?? null;
 		const nombre = c?.nombre ?? c?.Nombre ?? "";
 		const descripcion = c?.descripcion ?? c?.Descripcion ?? null;
-
 		return {
 			...c,
 			idCategoria: idCategoria != null ? Number(idCategoria) : null,
@@ -200,7 +214,7 @@
 	}
 
 	function openCreate() {
-		if (!canEdit.value) return;
+		if (!canCreate.value) return;
 		apiError.value = "";
 		mode.value = "create";
 		editingIdCategoria.value = null;

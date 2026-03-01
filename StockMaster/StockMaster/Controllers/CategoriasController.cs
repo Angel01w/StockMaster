@@ -3,11 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StockMaster.Domain.Entities;
 using StockMaster.Infrastructure.Data;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Security.Claims;
-using System.Threading.Tasks;
 
 namespace StockMaster.API.Controllers;
 
@@ -19,8 +15,8 @@ public class CategoriasController : ControllerBase
     private readonly AppDbContext _db;
     public CategoriasController(AppDbContext db) => _db = db;
 
-    public record CategoriaCreateDto(string Nombre, string? Descripcion);
-    public record CategoriaUpdateDto(string Nombre, string? Descripcion);
+    public record CategoriaCreateDto(string Nombre, string? Descripcion, int? IdProveedor);
+    public record CategoriaUpdateDto(string Nombre, string? Descripcion, int? IdProveedor);
 
     private int GetUserId()
     {
@@ -49,106 +45,147 @@ public class CategoriasController : ControllerBase
     private bool IsAdmin() => string.Equals(GetRole(), "Admin", StringComparison.OrdinalIgnoreCase);
     private bool IsAuditor() => string.Equals(GetRole(), "Auditor", StringComparison.OrdinalIgnoreCase);
 
-    private async Task<IQueryable<Categoria>> BuildScopedQueryAsync()
+    private async Task<int?> ResolveProveedorIdOrNullAsync()
     {
-        var q = _db.Categorias.AsNoTracking().AsQueryable();
+        var raw =
+            User.FindFirst("ProveedorId")?.Value ??
+            User.FindFirst("proveedorId")?.Value ??
+            User.FindFirst("IdProveedor")?.Value ??
+            User.FindFirst("idProveedor")?.Value;
 
-        if (IsAdmin() || IsAuditor())
-            return q;
+        if (!string.IsNullOrWhiteSpace(raw) && int.TryParse(raw, out var provFromToken) && provFromToken > 0)
+            return provFromToken;
 
         var userId = GetUserId();
 
-        var allowedIds = _db.UsuarioCategorias
+        var provFromUser = await _db.Usuarios
             .AsNoTracking()
-            .Where(x => x.IdUsuario == userId)
-            .Select(x => x.IdCategoria);
+            .Where(u => u.IdUsuario == userId)
+            .Select(u => (int?)u.IdProveedor)
+            .FirstOrDefaultAsync();
 
-        q = q.Where(c =>
-            c.CreatedByUserId == userId ||
-            allowedIds.Contains(c.IdCategoria)
-        );
+        if (provFromUser.HasValue && provFromUser.Value > 0)
+            return provFromUser.Value;
 
-        return q;
+        return null;
     }
+
+    private static string Clean(string? s) => (s ?? "").Trim();
 
     [HttpGet]
     public async Task<ActionResult<List<Categoria>>> GetAll()
     {
-        var q = await BuildScopedQueryAsync();
-        var list = await q.OrderBy(x => x.Nombre).ToListAsync();
-        return list;
+        var q = _db.Categorias.AsNoTracking().AsQueryable();
+
+        if (!IsAdmin() && !IsAuditor())
+        {
+            var prov = await ResolveProveedorIdOrNullAsync();
+            if (!prov.HasValue) return Unauthorized("Usuario sin IdProveedor asignado.");
+            q = q.Where(c => c.IdProveedor == prov.Value);
+        }
+
+        return await q.OrderBy(x => x.Nombre).ToListAsync();
     }
 
     [HttpGet("{id:int}")]
     public async Task<ActionResult<Categoria>> GetById(int id)
     {
-        var q = await BuildScopedQueryAsync();
-        var item = await q.FirstOrDefaultAsync(x => x.IdCategoria == id);
+        var q = _db.Categorias.AsNoTracking().Where(x => x.IdCategoria == id);
+
+        if (!IsAdmin() && !IsAuditor())
+        {
+            var prov = await ResolveProveedorIdOrNullAsync();
+            if (!prov.HasValue) return Unauthorized("Usuario sin IdProveedor asignado.");
+            q = q.Where(c => c.IdProveedor == prov.Value);
+        }
+
+        var item = await q.FirstOrDefaultAsync();
         if (item is null) return NotFound();
         return item;
     }
 
     [HttpPost]
-    public async Task<ActionResult<Categoria>> Create(CategoriaCreateDto dto)
+    public async Task<ActionResult<Categoria>> Create([FromBody] CategoriaCreateDto dto)
     {
-        if (dto is null) return BadRequest();
+        if (IsAuditor()) return Forbid();
 
-        var nombre = (dto.Nombre ?? "").Trim();
+        if (dto is null) return BadRequest("Body vacío.");
+
+        var nombre = Clean(dto.Nombre);
         if (string.IsNullOrWhiteSpace(nombre)) return BadRequest("Nombre requerido.");
 
-        var userId = GetUserId();
+        int provToUse;
 
-        if (!IsAdmin() && !IsAuditor())
+        if (IsAdmin())
         {
-            var existsMine = await _db.Categorias.AsNoTracking()
-                .AnyAsync(c => c.Nombre == nombre && c.CreatedByUserId == userId);
-            if (existsMine) return Conflict("Ya existe una categoría con ese nombre.");
+            if (!dto.IdProveedor.HasValue || dto.IdProveedor.Value <= 0)
+                return BadRequest("IdProveedor requerido para Admin.");
+
+            provToUse = dto.IdProveedor.Value;
         }
+        else
+        {
+            var prov = await ResolveProveedorIdOrNullAsync();
+            if (!prov.HasValue) return Unauthorized("Usuario sin IdProveedor asignado.");
+            provToUse = prov.Value;
+        }
+
+        var exists = await _db.Categorias.AsNoTracking()
+            .AnyAsync(c => c.IdProveedor == provToUse && c.Nombre == nombre);
+
+        if (exists) return Conflict("Ya existe una categoría con ese nombre para este proveedor.");
 
         var entity = new Categoria
         {
             Nombre = nombre,
             Descripcion = string.IsNullOrWhiteSpace(dto.Descripcion) ? null : dto.Descripcion.Trim(),
-            CreatedByUserId = (IsAdmin() || IsAuditor()) ? null : userId
+            IdProveedor = provToUse,
+            CreatedAt = DateTime.UtcNow,
+            CreatedByUserId = IsAdmin() ? null : GetUserId()
         };
 
         _db.Categorias.Add(entity);
         await _db.SaveChangesAsync();
 
-        if (!IsAdmin() && !IsAuditor())
-        {
-            var link = new UsuarioCategoria { IdUsuario = userId, IdCategoria = entity.IdCategoria };
-            _db.UsuarioCategorias.Add(link);
-            await _db.SaveChangesAsync();
-        }
-
         return CreatedAtAction(nameof(GetById), new { id = entity.IdCategoria }, entity);
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, CategoriaUpdateDto dto)
+    public async Task<IActionResult> Update(int id, [FromBody] CategoriaUpdateDto dto)
     {
-        if (dto is null) return BadRequest();
+        if (IsAuditor()) return Forbid();
 
-        var nombre = (dto.Nombre ?? "").Trim();
+        if (dto is null) return BadRequest("Body vacío.");
+
+        var nombre = Clean(dto.Nombre);
         if (string.IsNullOrWhiteSpace(nombre)) return BadRequest("Nombre requerido.");
 
-        var item = await _db.Categorias.FirstOrDefaultAsync(x => x.IdCategoria == id);
+        var q = _db.Categorias.Where(x => x.IdCategoria == id);
+
+        if (!IsAdmin())
+        {
+            var prov = await ResolveProveedorIdOrNullAsync();
+            if (!prov.HasValue) return Unauthorized("Usuario sin IdProveedor asignado.");
+            q = q.Where(x => x.IdProveedor == prov.Value);
+        }
+
+        var item = await q.FirstOrDefaultAsync();
         if (item is null) return NotFound();
 
-        if (!IsAdmin() && !IsAuditor())
-        {
-            var userId = GetUserId();
+        var provToUse = item.IdProveedor;
 
-            var allowed = await _db.UsuarioCategorias.AsNoTracking()
-                .AnyAsync(x => x.IdUsuario == userId && x.IdCategoria == id);
+        if (IsAdmin() && dto.IdProveedor.HasValue && dto.IdProveedor.Value > 0)
+            provToUse = dto.IdProveedor.Value;
 
-            var can = allowed || item.CreatedByUserId == userId;
-            if (!can) return Forbid();
-        }
+        var dup = await _db.Categorias.AsNoTracking().AnyAsync(x =>
+            x.IdProveedor == provToUse && x.Nombre == nombre && x.IdCategoria != id);
+
+        if (dup) return Conflict("Ya existe otra categoría con ese nombre para este proveedor.");
 
         item.Nombre = nombre;
         item.Descripcion = string.IsNullOrWhiteSpace(dto.Descripcion) ? null : dto.Descripcion.Trim();
+        item.IdProveedor = provToUse;
+        item.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
         return NoContent();
@@ -157,30 +194,26 @@ public class CategoriasController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
-        var item = await _db.Categorias.FirstOrDefaultAsync(x => x.IdCategoria == id);
-        if (item is null) return NotFound();
+        if (IsAuditor()) return Forbid();
 
-        if (!IsAdmin() && !IsAuditor())
+        var q = _db.Categorias.Where(x => x.IdCategoria == id);
+
+        if (!IsAdmin())
         {
-            var userId = GetUserId();
-
-            var allowed = await _db.UsuarioCategorias.AsNoTracking()
-                .AnyAsync(x => x.IdUsuario == userId && x.IdCategoria == id);
-
-            var can = item.CreatedByUserId == userId || allowed;
-            if (!can) return Forbid();
-
-            if (item.CreatedByUserId != userId) return Forbid();
+            var prov = await ResolveProveedorIdOrNullAsync();
+            if (!prov.HasValue) return Unauthorized("Usuario sin IdProveedor asignado.");
+            q = q.Where(x => x.IdProveedor == prov.Value);
         }
+
+        var item = await q.FirstOrDefaultAsync();
+        if (item is null) return NotFound();
 
         var used = await _db.Productos.AsNoTracking().AnyAsync(p => p.IdCategoria == id);
         if (used) return Conflict("No se puede eliminar: hay productos usando esta categoría.");
 
-        var links = _db.UsuarioCategorias.Where(x => x.IdCategoria == id);
-        _db.UsuarioCategorias.RemoveRange(links);
-
         _db.Categorias.Remove(item);
         await _db.SaveChangesAsync();
+
         return NoContent();
     }
 }

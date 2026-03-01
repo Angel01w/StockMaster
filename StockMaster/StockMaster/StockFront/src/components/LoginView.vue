@@ -38,9 +38,7 @@
 						<button class="eyeBtn"
 								type="button"
 								@click="showPass = !showPass"
-								:disabled="loading"
-								aria-label="Mostrar u ocultar contraseña"
-								title="Mostrar/Ocultar">
+								:disabled="loading">
 							{{ showPass ? "🙈" : "👁️" }}
 						</button>
 					</div>
@@ -51,7 +49,9 @@
 
 					<p v-if="error" class="error">{{ error }}</p>
 
-					<div class="copy">© 2026 StockMaster - Todos los derechos reservados.</div>
+					<div class="copy">
+						© 2026 StockMaster - Todos los derechos reservados.
+					</div>
 				</form>
 			</div>
 		</div>
@@ -76,29 +76,47 @@
 
 	async function onSubmit() {
 		error.value = "";
+
+		if (!form.username || !form.password) {
+			error.value = "Debe ingresar usuario y contraseña.";
+			return;
+		}
+
 		loading.value = true;
 
 		try {
 			await login({
-				username: form.username,
+				login: form.username,
 				password: form.password,
 			});
 
 			router.replace("/dashboard");
 		} catch (e) {
-			const msg =
-				e?.response?.data?.message ||
-				e?.response?.data?.msg ||
-				e?.message ||
-				"No se pudo iniciar sesión.";
-			error.value = msg;
+			if (e?.response) {
+				const status = e.response.status;
+				const backendMsg = e.response.data?.message;
+
+				if (status === 400) {
+					error.value = backendMsg || "Debe completar todos los campos.";
+				}
+				else if (status === 401) {
+					error.value = backendMsg || "Usuario o contraseña incorrectos.";
+				}
+				else if (status === 403) {
+					error.value = backendMsg || "La cuenta está desactivada.";
+				}
+				else if (status === 500) {
+					error.value = "Error interno del servidor. Intente más tarde.";
+				}
+				else {
+					error.value = backendMsg || "Error inesperado.";
+				}
+			} else {
+				error.value = "No se pudo conectar con el servidor.";
+			}
 		} finally {
 			loading.value = false;
 		}
-	}
-
-	function onForgot() {
-		alert("Funcionalidad de recuperación pendiente.");
 	}
 </script>
 
@@ -125,7 +143,6 @@
 		.brand h1 {
 			margin: 18px 0 8px;
 			font-size: 52px;
-			letter-spacing: -0.5px;
 		}
 
 		.brand p {
@@ -144,7 +161,6 @@
 		width: 440px;
 		max-width: 92vw;
 		background: rgba(255, 255, 255, 0.92);
-		border: 1px solid rgba(255, 255, 255, 0.7);
 		border-radius: 18px;
 		padding: 28px 28px 18px;
 		box-shadow: 0 18px 50px rgba(18, 23, 38, 0.25);
@@ -174,7 +190,6 @@
 	.icon {
 		position: absolute;
 		left: 12px;
-		opacity: 0.7;
 		font-size: 16px;
 	}
 
@@ -200,15 +215,8 @@
 		border: none;
 		background: transparent;
 		cursor: pointer;
-		opacity: 0.75;
 		font-size: 16px;
 		padding: 6px;
-	}
-
-	.row {
-		display: flex;
-		justify-content: flex-end;
-		margin: 10px 0 16px;
 	}
 
 	.btn {
@@ -221,19 +229,12 @@
 		color: #fff;
 		font-weight: 700;
 		cursor: pointer;
-		box-shadow: 0 10px 22px rgba(47, 107, 255, 0.28);
 	}
 
 		.btn:disabled {
 			opacity: 0.75;
 			cursor: not-allowed;
 		}
-
-	.link {
-		color: #2a55ff;
-		font-size: 13px;
-		text-decoration: none;
-	}
 
 	.copy {
 		margin-top: 12px;
