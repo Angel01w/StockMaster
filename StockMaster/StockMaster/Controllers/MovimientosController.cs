@@ -26,7 +26,6 @@ public class MovimientosController : ControllerBase
         string Producto,
         int Cantidad,
         string Motivo,
-        string? Documento,
         string Usuario
     );
 
@@ -35,8 +34,7 @@ public class MovimientosController : ControllerBase
         string Tipo,
         int Cantidad,
         DateTime? Fecha,
-        int? IdMotivo,
-        string? Documento
+        int? IdMotivo
     );
 
     private int GetUserId()
@@ -54,18 +52,37 @@ public class MovimientosController : ControllerBase
 
     private string GetRole()
     {
-        return
+        var raw =
             User.FindFirst(ClaimTypes.Role)?.Value ??
             User.FindFirst("role")?.Value ??
+            User.FindFirst("Role")?.Value ??
+            User.FindFirst("rol")?.Value ??
             User.FindFirst("Rol")?.Value ??
             "";
+
+        return (raw ?? "").Trim();
     }
 
-    private bool IsAdmin() => string.Equals(GetRole(), "Admin", StringComparison.OrdinalIgnoreCase);
-    private bool IsAuditor() => string.Equals(GetRole(), "Auditor", StringComparison.OrdinalIgnoreCase);
+    private bool IsAdmin()
+    {
+        var r = GetRole();
+        return string.Equals(r, "admin", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(r, "administrator", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(r, "administrador", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsAuditor()
+    {
+        var r = GetRole();
+        return string.Equals(r, "auditor", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(r, "Auditor", StringComparison.OrdinalIgnoreCase);
+    }
 
     private async Task<int?> ResolveAreaIdOrNullAsync()
     {
+        if (IsAdmin() || IsAuditor()) return null;
+
         var raw =
             User.FindFirst("IdArea")?.Value ??
             User.FindFirst("idArea")?.Value ??
@@ -110,7 +127,7 @@ public class MovimientosController : ControllerBase
     {
         var areaId = await ResolveAreaIdOrNullAsync();
 
-        if (!areaId.HasValue && !IsAdmin())
+        if (!areaId.HasValue && !IsAdmin() && !IsAuditor())
             return Unauthorized("Token sin IdArea/AreaId válido.");
 
         var q =
@@ -128,7 +145,7 @@ public class MovimientosController : ControllerBase
                 UsuarioNombre = u != null ? (u.Username ?? "") : ""
             };
 
-        if (areaId.HasValue)
+        if (areaId.HasValue && !IsAdmin() && !IsAuditor())
             q = q.Where(x => x.p.IdArea == areaId.Value);
 
         if (desde.HasValue) q = q.Where(x => x.m.Fecha >= desde.Value);
@@ -148,7 +165,6 @@ public class MovimientosController : ControllerBase
                 x.p.Nombre ?? "",
                 x.m.Cantidad,
                 x.MotivoNombre,
-                x.m.Documento,
                 x.UsuarioNombre
             ))
             .ToListAsync();
@@ -164,7 +180,7 @@ public class MovimientosController : ControllerBase
         var areaId = await ResolveAreaIdOrNullAsync();
         var userId = GetUserId();
 
-        if (!areaId.HasValue && !IsAdmin())
+        if (!areaId.HasValue && !IsAdmin() && !IsAuditor())
             return Unauthorized("Token sin IdArea/AreaId válido.");
 
         if (dto.IdProducto <= 0) return BadRequest("IdProducto inválido.");
@@ -180,11 +196,19 @@ public class MovimientosController : ControllerBase
         var producto = await _db.Productos.FirstOrDefaultAsync(p => p.IdProducto == dto.IdProducto);
         if (producto is null) return NotFound("Producto no existe.");
 
-        if (areaId.HasValue && producto.IdArea != areaId.Value)
+        if (areaId.HasValue && !IsAdmin() && !IsAuditor() && producto.IdArea != areaId.Value)
             return Forbid();
 
         if (string.Equals(tipo, "Salida", StringComparison.OrdinalIgnoreCase) && producto.StockActual < dto.Cantidad)
             return BadRequest("Stock insuficiente.");
+
+        var motivoId = dto.IdMotivo.HasValue && dto.IdMotivo.Value > 0 ? dto.IdMotivo.Value : 0;
+
+        if (motivoId > 0)
+        {
+            var motivoOk = await _db.MotivosMovimiento.AsNoTracking().AnyAsync(x => x.IdMotivo == motivoId);
+            if (!motivoOk) return BadRequest("IdMotivo inválido.");
+        }
 
         var fecha = dto.Fecha ?? DateTime.UtcNow;
 
@@ -195,9 +219,7 @@ public class MovimientosController : ControllerBase
             Cantidad = dto.Cantidad,
             Fecha = fecha,
             IdUsuario = userId,
-            IdMotivo = dto.IdMotivo,
-            Documento = dto.Documento,
-            CreatedAt = DateTime.UtcNow
+            IdMotivo = motivoId
         };
 
         if (string.Equals(mov.Tipo, "Entrada", StringComparison.OrdinalIgnoreCase)) producto.StockActual += mov.Cantidad;
@@ -209,11 +231,11 @@ public class MovimientosController : ControllerBase
         await _db.SaveChangesAsync();
 
         var motivoNombre = "";
-        if (mov.IdMotivo.HasValue)
+        if (mov.IdMotivo > 0)
         {
             motivoNombre = await _db.MotivosMovimiento
                 .AsNoTracking()
-                .Where(x => x.IdMotivo == mov.IdMotivo.Value)
+                .Where(x => x.IdMotivo == mov.IdMotivo)
                 .Select(x => x.Nombre)
                 .FirstOrDefaultAsync() ?? "";
         }
@@ -231,7 +253,6 @@ public class MovimientosController : ControllerBase
             producto.Nombre ?? "",
             mov.Cantidad,
             motivoNombre,
-            mov.Documento,
             usuarioNombre
         ));
     }

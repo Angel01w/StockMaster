@@ -139,6 +139,13 @@ function buildUser(data, body) {
     };
 }
 
+function authHeaders(extra) {
+    const t = pickToken();
+    const h = { ...(extra || {}) };
+    if (t) h.Authorization = `Bearer ${t}`;
+    return h;
+}
+
 export async function login(payload) {
     try {
         const loginValue = firstNonEmpty(
@@ -256,4 +263,24 @@ export function isAuditor() {
 
 export function isUsuario() {
     return getRole() === "usuario";
+}
+
+export async function apiGet(path, config) {
+    const url = path.startsWith("http") ? path : API_BASE + path;
+    return axios.get(url, { ...(config || {}), headers: authHeaders((config && config.headers) || {}) });
+}
+
+export async function apiPost(path, data, config) {
+    const url = path.startsWith("http") ? path : API_BASE + path;
+    return axios.post(url, data, { ...(config || {}), headers: authHeaders((config && config.headers) || {}) });
+}
+
+export async function apiPut(path, data, config) {
+    const url = path.startsWith("http") ? path : API_BASE + path;
+    return axios.put(url, data, { ...(config || {}), headers: authHeaders((config && config.headers) || {}) });
+}
+
+export async function apiDelete(path, config) {
+    const url = path.startsWith("http") ? path : API_BASE + path;
+    return axios.delete(url, { ...(config || {}), headers: authHeaders((config && config.headers) || {}) });
 }

@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<Categoria> Categorias { get; set; }
     public DbSet<Proveedor> Proveedores { get; set; }
     public DbSet<MotivoMovimiento> MotivosMovimiento { get; set; }
+    public DbSet<Area> Areas { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -34,6 +35,9 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<UsuarioArea>()
             .HasKey(x => new { x.IdUsuario, x.IdArea });
+
+        modelBuilder.Entity<Area>()
+            .HasKey(a => a.IdArea);
 
         modelBuilder.Entity<Categoria>()
             .HasKey(c => c.IdCategoria);
@@ -56,10 +60,39 @@ public class AppDbContext : DbContext
             .HasForeignKey(p => p.IdProveedor)
             .HasConstraintName("FK_Productos_Proveedores_IdProveedor");
 
+        modelBuilder.Entity<Producto>()
+            .HasOne<Area>()
+            .WithMany()
+            .HasForeignKey(p => p.IdArea)
+            .HasConstraintName("FK_Productos_Areas");
+
         modelBuilder.Entity<MotivoMovimiento>()
             .HasKey(m => m.IdMotivo);
 
         modelBuilder.Entity<MovimientoInventario>()
             .HasKey(m => m.IdMovimiento);
+
+        modelBuilder.Entity<MovimientoInventario>()
+            .Property(m => m.IdMovimiento)
+            .ValueGeneratedOnAdd()
+            .HasColumnType("bigint");
+
+        modelBuilder.Entity<MovimientoInventario>()
+            .HasOne(m => m.Producto)
+            .WithMany(p => p.MovimientosInventario)
+            .HasForeignKey(m => m.IdProducto)
+            .HasConstraintName("FK_MovimientosInventario_Productos_IdProducto");
+
+        modelBuilder.Entity<MovimientoInventario>()
+            .HasOne(m => m.Motivo)
+            .WithMany()
+            .HasForeignKey(m => m.IdMotivo)
+            .HasConstraintName("FK_MovimientosInventario_Motivos_IdMotivo");
+
+        modelBuilder.Entity<MovimientoInventario>()
+            .HasOne(m => m.Usuario)
+            .WithMany()
+            .HasForeignKey(m => m.IdUsuario)
+            .HasConstraintName("FK_MovimientosInventario_Usuarios_IdUsuario");
     }
 }

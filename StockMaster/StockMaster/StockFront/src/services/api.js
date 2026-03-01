@@ -1,54 +1,32 @@
-﻿const API_BASE = "https://localhost:7198";
+﻿import { getToken, logout } from "../router/auth.service";
 
-function readJwtExp(token) {
-	try {
-		const p = token.split(".")[1];
-		if (!p) return 0;
-		const b64 = p.replace(/-/g, "+").replace(/_/g, "/");
-		const pad = b64.length % 4 ? "=".repeat(4 - (b64.length % 4)) : "";
-		const json = atob(b64 + pad);
-		const obj = JSON.parse(json);
-		return Number(obj?.exp || 0);
-	} catch {
-		return 0;
-	}
-}
+const API_BASE = "https://localhost:7198";
 
-function pickToken() {
-	const t1 = localStorage.getItem("token") || "";
-	const t2 = localStorage.getItem("sm_token") || "";
-	if (t1 && !t2) return t1;
-	if (!t1 && t2) return t2;
-	if (!t1 && !t2) return "";
-	return readJwtExp(t1) >= readJwtExp(t2) ? t1 : t2;
-}
+export async function apiFetch(path, options = {}) {
+    const token = getToken();
 
-export async function apiFetch(url, options) {
-	const finalUrl = /^https?:\/\//i.test(url) ? url : (API_BASE + url);
-	const token = pickToken();
+    const headers = new Headers(options.headers || {});
+    if (!headers.has("Content-Type") && options.body) headers.set("Content-Type", "application/json");
+    if (token) headers.set("Authorization", `Bearer ${token}`);
 
-	const opt = options || {};
-	const hdrs = opt.headers ? { ...opt.headers } : {};
+    const res = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers
+    });
 
-	if (!hdrs["Content-Type"] && !(opt.body instanceof FormData)) {
-		hdrs["Content-Type"] = "application/json";
-	}
+    if (res.status === 401) {
+        logout();
+        throw new Error("401");
+    }
 
-	if (token) {
-		hdrs["Authorization"] = "Bearer " + token;
-	}
+    if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(txt || `${res.status}`);
+    }
 
-	const res = await fetch(finalUrl, { ...opt, headers: hdrs });
+    if (res.status === 204) return null;
 
-	if (!res.ok) {
-		const text = await res.text().catch(() => "");
-		const st = `${res.status ?? 0} ${res.statusText || "Error"}`.trim();
-		throw new Error(text?.trim() ? text : st);
-	}
-
-	const ct = res.headers.get("content-type") || "";
-	if (ct.includes("application/json")) return await res.json();
-
-	const t = await res.text();
-	try { return t ? JSON.parse(t) : null; } catch { return t; }
+    const ct = res.headers.get("content-type") || "";
+    if (ct.includes("application/json")) return await res.json();
+    return await res.text();
 }

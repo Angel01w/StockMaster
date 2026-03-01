@@ -1,47 +1,17 @@
-﻿using System;
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
-using System.Text.Json.Serialization;
+﻿namespace StockMaster.Domain.Entities;
 
-namespace StockMaster.Domain.Entities
+public class MovimientoInventario
 {
-    [Table("MovimientosInventario")]
-    public class MovimientoInventario
-    {
-        [Key]
-        public long IdMovimiento { get; set; }
+    public long IdMovimiento { get; set; }
+    public DateTime Fecha { get; set; }
+    public string Tipo { get; set; } = "Entrada";
+    public int Cantidad { get; set; }
 
-        [Required]
-        public DateTime Fecha { get; set; }
+    public int IdProducto { get; set; }
+    public int IdMotivo { get; set; }
+    public int IdUsuario { get; set; }
 
-        [Required]
-        [MaxLength(10)]
-        public string Tipo { get; set; } = string.Empty;
-
-        [Required]
-        public int IdProducto { get; set; }
-
-        [Required]
-        public int Cantidad { get; set; }
-
-        public int? IdMotivo { get; set; }
-
-        [MaxLength(60)]
-        public string? Documento { get; set; }
-
-        [Required]
-        public int IdUsuario { get; set; }
-
-        [Required]
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-        [JsonIgnore]
-        public Producto? Producto { get; set; }
-
-        [JsonIgnore]
-        public MotivoMovimiento? Motivo { get; set; }
-
-        [JsonIgnore]
-        public Usuario? Usuario { get; set; }
-    }
+    public Producto Producto { get; set; } = null!;
+    public MotivoMovimiento Motivo { get; set; } = null!;
+    public Usuario Usuario { get; set; } = null!;
 }

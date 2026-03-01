@@ -96,7 +96,6 @@
 						<div>Producto</div>
 						<div class="num">Cantidad</div>
 						<div>Motivo</div>
-						<div>Documento</div>
 						<div>Usuario</div>
 					</div>
 
@@ -113,17 +112,6 @@
 						<div class="prod">{{ productoLabel(m) }}</div>
 						<div class="num qty">{{ m.cantidad }}</div>
 						<div class="muted">{{ motivoLabel(m) }}</div>
-
-						<div class="doc">
-							<span v-if="m.documento" class="doc-ic">
-								<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-									<path d="M7 3h7l3 3v15a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-									<path d="M14 3v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-								</svg>
-							</span>
-							<span class="doc-txt">{{ m.documento || "-" }}</span>
-						</div>
-
 						<div class="muted">{{ usuarioLabel(m) }}</div>
 					</div>
 
@@ -179,16 +167,9 @@
 							<div v-else-if="productosError" class="miniWarn">{{ productosError }}</div>
 						</div>
 
-						<div class="grid2">
-							<div class="field">
-								<label>Cantidad</label>
-								<input type="number" min="0" step="1" v-model.number="form.cantidad" :disabled="!canEdit" />
-							</div>
-
-							<div class="field">
-								<label>Documento (Opcional)</label>
-								<input v-model.trim="form.documento" placeholder="Ej: FAC-2024-001" autocomplete="off" :disabled="!canEdit" />
-							</div>
+						<div class="field">
+							<label>Cantidad</label>
+							<input type="number" min="0" step="1" v-model.number="form.cantidad" :disabled="!canEdit" />
 						</div>
 
 						<div class="field">
@@ -300,7 +281,6 @@
 		idProducto: null,
 		cantidad: 0,
 		idMotivo: null,
-		documento: "",
 		idUsuario: null,
 	});
 	const form = reactive(emptyForm());
@@ -460,7 +440,6 @@
 			cantidad: Number(m?.cantidad ?? m?.Cantidad ?? 0),
 			idMotivo: idMotivo != null ? Number(idMotivo) : null,
 			motivoNombre: String(motivoNombre ?? "").trim(),
-			documento: m?.documento ?? m?.Documento ?? "",
 			idUsuario: idUsuario != null ? Number(idUsuario) : null,
 			usuarioNombre: String(usuarioNombre ?? "").trim(),
 			createdAt: m?.createdAt ?? m?.CreatedAt ?? null,
@@ -601,7 +580,6 @@
 				String(m.tipo ?? "").toLowerCase().includes(q) ||
 				String(productoLabel(m) ?? "").toLowerCase().includes(q) ||
 				String(motivoLabel(m) ?? "").toLowerCase().includes(q) ||
-				String(m.documento ?? "").toLowerCase().includes(q) ||
 				String(usuarioLabel(m) ?? "").toLowerCase().includes(q)
 			);
 		});
@@ -646,12 +624,11 @@
 		saving.value = true;
 		try {
 			const payload = {
-				fecha: form.fecha,
-				tipo: form.tipo,
 				idProducto: Number(form.idProducto),
+				tipo: form.tipo,
 				cantidad: Number(form.cantidad),
-				idMotivo: Number(form.idMotivo),
-				documento: form.documento || null,
+				fecha: form.fecha,
+				idMotivo: form.idMotivo != null ? Number(form.idMotivo) : null,
 				idUsuario: Number(form.idUsuario),
 			};
 
@@ -739,10 +716,10 @@
 		color: #2563eb;
 	}
 
-		.cube svg {
-			width: 22px;
-			height: 22px;
-		}
+	.cube svg {
+		width: 22px;
+		height: 22px;
+	}
 
 	.h1 {
 		font-weight: 900;
@@ -798,10 +775,10 @@
 		place-items: center;
 	}
 
-		.stat-ic svg {
-			width: 22px;
-			height: 22px;
-		}
+	.stat-ic svg {
+		width: 22px;
+		height: 22px;
+	}
 
 	.ic-blue {
 		background: rgba(59,130,246,.12);
@@ -825,13 +802,13 @@
 		color: #0f172a;
 	}
 
-		.stat-num.green {
-			color: #16a34a;
-		}
+	.stat-num.green {
+		color: #16a34a;
+	}
 
-		.stat-num.red {
-			color: #ef4444;
-		}
+	.stat-num.red {
+		color: #ef4444;
+	}
 
 	.stat-lbl {
 		margin-top: 6px;
@@ -875,10 +852,10 @@
 		place-items: center;
 	}
 
-		.search-ic svg {
-			width: 18px;
-			height: 18px;
-		}
+	.search-ic svg {
+		width: 18px;
+		height: 18px;
+	}
 
 	.search-in {
 		border: 0;
@@ -904,12 +881,12 @@
 		cursor: pointer;
 	}
 
-		.tab.active {
-			background: linear-gradient(180deg,#2f74ff,#1e5ae9);
-			color: #fff;
-			border-color: transparent;
-			box-shadow: 0 12px 22px rgba(37,99,235,.20);
-		}
+	.tab.active {
+		background: linear-gradient(180deg,#2f74ff,#1e5ae9);
+		color: #fff;
+		border-color: transparent;
+		box-shadow: 0 12px 22px rgba(37,99,235,.20);
+	}
 
 	.table {
 		padding: 0 14px 10px;
@@ -917,7 +894,7 @@
 
 	.thead {
 		display: grid;
-		grid-template-columns: 1.1fr 0.9fr 1.8fr 0.8fr 1.1fr 1.2fr 1.1fr;
+		grid-template-columns: 1.1fr 0.9fr 1.8fr 0.8fr 1.1fr 1.1fr;
 		gap: 14px;
 		padding: 12px 12px;
 		color: #64748b;
@@ -931,7 +908,7 @@
 
 	.trow {
 		display: grid;
-		grid-template-columns: 1.1fr 0.9fr 1.8fr 0.8fr 1.1fr 1.2fr 1.1fr;
+		grid-template-columns: 1.1fr 0.9fr 1.8fr 0.8fr 1.1fr 1.1fr;
 		gap: 14px;
 		padding: 16px 12px;
 		border-bottom: 1px solid rgba(15,23,42,.05);
@@ -974,13 +951,13 @@
 		border: 1px solid transparent;
 	}
 
-		.pill .dot {
-			width: 8px;
-			height: 8px;
-			border-radius: 99px;
-			background: currentColor;
-			opacity: .85;
-		}
+	.pill .dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 99px;
+		background: currentColor;
+		opacity: .85;
+	}
 
 	.pill-green {
 		color: #16a34a;
@@ -992,30 +969,6 @@
 		color: #ef4444;
 		background: rgba(239,68,68,.10);
 		border-color: rgba(239,68,68,.18);
-	}
-
-	.doc {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		color: #2563eb;
-		font-weight: 900;
-	}
-
-	.doc-ic {
-		width: 18px;
-		height: 18px;
-		display: grid;
-		place-items: center;
-	}
-
-		.doc-ic svg {
-			width: 18px;
-			height: 18px;
-		}
-
-	.doc-txt {
-		color: #2563eb;
 	}
 
 	.tfoot {
@@ -1116,10 +1069,10 @@
 		background-repeat: no-repeat;
 	}
 
-		.field input:focus, .field select:focus, .field textarea:focus {
-			border-color: rgba(59,130,246,.65);
-			box-shadow: 0 0 0 3px rgba(59,130,246,.18);
-		}
+	.field input:focus, .field select:focus, .field textarea:focus {
+		border-color: rgba(59,130,246,.65);
+		box-shadow: 0 0 0 3px rgba(59,130,246,.18);
+	}
 
 	.modalFoot {
 		padding: 14px 18px 18px;
@@ -1149,10 +1102,10 @@
 		box-shadow: 0 14px 28px rgba(37,99,235,.25);
 	}
 
-		.btnPrimary:disabled {
-			opacity: .7;
-			cursor: not-allowed;
-		}
+	.btnPrimary:disabled {
+		opacity: .7;
+		cursor: not-allowed;
+	}
 
 	.alert {
 		border: 1px solid rgba(239,68,68,.25);
