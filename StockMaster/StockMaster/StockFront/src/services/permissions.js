@@ -23,6 +23,8 @@ export const PERMISSIONS = {
         canEditCatalogos: true,
         canViewReportes: true,
         canEditReportes: true,
+        canDownloadReportes: true,
+        canReadAll: true,
     },
     [ROLES.AUDITOR]: {
         canView: true,
@@ -35,6 +37,8 @@ export const PERMISSIONS = {
         canEditCatalogos: false,
         canViewReportes: true,
         canEditReportes: false,
+        canDownloadReportes: false,
+        canReadAll: true,
     },
     [ROLES.USUARIO]: {
         canView: true,
@@ -47,6 +51,8 @@ export const PERMISSIONS = {
         canEditCatalogos: true,
         canViewReportes: true,
         canEditReportes: false,
+        canDownloadReportes: false,
+        canReadAll: false,
     },
 };
 
@@ -54,13 +60,37 @@ export function getPerms(role) {
     return PERMISSIONS[normalizeRole(role)] || PERMISSIONS[ROLES.USUARIO];
 }
 
+function pickUsername(u) {
+    const v =
+        u?.username ??
+        u?.Username ??
+        u?.userName ??
+        u?.UserName ??
+        u?.login ??
+        u?.Login ??
+        "";
+    return (v || "").toString().trim().toLowerCase();
+}
+
+const DOWNLOAD_WHITELIST = new Set(["a.jimenezc", "am.sierra"]);
+
 export function getPermsSafe(userOrRole) {
     try {
-        const raw =
+        const rawRole =
             typeof userOrRole === "string"
                 ? userOrRole
                 : (userOrRole?.rol || userOrRole?.role || userOrRole?.roleLabel || "");
-        return getPerms(raw);
+
+        const base = getPerms(rawRole);
+
+        if (typeof userOrRole === "object" && userOrRole) {
+            const username = pickUsername(userOrRole);
+            if (DOWNLOAD_WHITELIST.has(username)) {
+                return { ...base, canDownloadReportes: true };
+            }
+        }
+
+        return base;
     } catch {
         return PERMISSIONS[ROLES.USUARIO];
     }

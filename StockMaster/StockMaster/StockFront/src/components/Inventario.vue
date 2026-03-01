@@ -191,26 +191,14 @@
 
 						<div class="field">
 							<label>Usuario</label>
-							<select v-model.number="form.idUsuario" :disabled="usuariosLoading || !canEdit">
-								<option :value="null" disabled>
-									{{ usuariosLoading ? "Cargando usuarios..." : "Seleccione un usuario" }}
-								</option>
-								<option v-for="u in usuarios" :key="String(u.idUsuario)" :value="Number(u.idUsuario)">
-									{{ u.nombreCompleto }}
-								</option>
-							</select>
-
-							<div v-if="!usuariosLoading && usuariosLoadedOnce && usuarios.length === 0" class="miniWarn">
-								No hay usuarios registrados (api/Usuarios devolvió vacío).
-							</div>
-							<div v-else-if="usuariosError" class="miniWarn">{{ usuariosError }}</div>
+							<input type="text" :value="loggedUserLabel" readonly :disabled="!canEdit" />
 						</div>
 					</div>
 
 					<div class="modalFoot">
 						<button class="btnLink" type="button" @click="closeModal">Cancelar</button>
 
-						<button class="btnPrimary" type="button" :disabled="saving || motivosLoading || productosLoading || usuariosLoading || !canEdit" @click="createMovement">
+						<button class="btnPrimary" type="button" :disabled="saving || motivosLoading || productosLoading || !canEdit" @click="createMovement">
 							{{ saving ? "Registrando..." : "Registrar Movimiento" }}
 						</button>
 					</div>
@@ -231,15 +219,29 @@
 	const perms = computed(() => getPermsSafe(user.value));
 	const canEdit = computed(() => perms.value?.canEditInventario === true || perms.value?.canEditAll === true);
 
+	const loggedUserId = computed(() => {
+		const u = user.value;
+		const id = u?.idUsuario ?? u?.IdUsuario ?? u?.id ?? u?.Id ?? null;
+		return id != null ? Number(id) : null;
+	});
+
+	const loggedUserLabel = computed(() => {
+		const u = user.value;
+		return String(
+			u?.nombreCompleto ??
+			u?.NombreCompleto ??
+			u?.nombre ??
+			u?.Nombre ??
+			u?.username ??
+			u?.Username ??
+			u?.email ??
+			u?.Email ??
+			""
+		).trim();
+	});
+
 	const MOV_ENDPOINT = "/api/Movimientos";
 	const PRODUCTOS_ENDPOINT = "/api/Productos";
-
-	const USUARIOS_ENDPOINTS = [
-		"/api/Usuarios",
-		"/api/Usuario",
-		"/api/Users",
-		"/api/UsuariosSistema",
-	];
 
 	const MOTIVOS_ENDPOINTS = [
 		"/api/Motivos",
@@ -270,18 +272,12 @@
 	const motivosLoading = ref(false);
 	const motivosLoadedOnce = ref(false);
 
-	const usuarios = ref([]);
-	const usuariosError = ref("");
-	const usuariosLoading = ref(false);
-	const usuariosLoadedOnce = ref(false);
-
 	const emptyForm = () => ({
 		fecha: toDateInputValue(new Date()),
 		tipo: "Entrada",
 		idProducto: null,
 		cantidad: 0,
 		idMotivo: null,
-		idUsuario: null,
 	});
 	const form = reactive(emptyForm());
 
@@ -321,7 +317,7 @@
 		loading.value = true;
 		loadError.value = "";
 		try {
-			await Promise.all([loadProductos(), loadMotivos(), loadUsuarios()]);
+			await Promise.all([loadProductos(), loadMotivos()]);
 			await loadMovimientos();
 			syncTipoConMotivo();
 		} catch (e) {
@@ -361,25 +357,6 @@
 			idMotivo: idMotivo != null ? Number(idMotivo) : null,
 			nombre: String(nombre ?? "").trim(),
 			tipoAplica,
-		};
-	}
-
-	function normalizeUsuario(u) {
-		const idUsuario = u?.idUsuario ?? u?.IdUsuario ?? u?.id ?? u?.Id ?? null;
-		const nombreCompleto =
-			u?.nombreCompleto ??
-			u?.NombreCompleto ??
-			u?.nombre ??
-			u?.Nombre ??
-			u?.username ??
-			u?.Username ??
-			u?.email ??
-			u?.Email ??
-			"";
-		return {
-			...u,
-			idUsuario: idUsuario != null ? Number(idUsuario) : null,
-			nombreCompleto: String(nombreCompleto ?? "").trim(),
 		};
 	}
 
@@ -472,10 +449,14 @@
 	function usuarioLabel(m) {
 		const txt = m?.usuarioNombre;
 		if (txt && String(txt).trim()) return String(txt).trim();
+
 		const id = Number(m?.idUsuario);
-		if (!id) return "-";
-		const found = usuarios.value.find((x) => Number(x.idUsuario) === id);
-		return found?.nombreCompleto ?? "-";
+		if (loggedUserId.value != null && id && id === loggedUserId.value) {
+			return loggedUserLabel.value || "-";
+		}
+
+		if (!id && loggedUserLabel.value) return loggedUserLabel.value;
+		return "-";
 	}
 
 	async function fetchFirstList(endpoints) {
@@ -536,25 +517,6 @@
 		}
 	}
 
-	async function loadUsuarios() {
-		usuariosLoading.value = true;
-		usuariosLoadedOnce.value = true;
-		usuariosError.value = "";
-		try {
-			const { list } = await fetchFirstList(USUARIOS_ENDPOINTS);
-			usuarios.value = list.map(normalizeUsuario).filter((u) => u.idUsuario != null && u.nombreCompleto);
-
-			if (usuarios.value.length > 0 && form.idUsuario == null) {
-				form.idUsuario = Number(usuarios.value[0].idUsuario);
-			}
-		} catch (e) {
-			usuarios.value = [];
-			usuariosError.value = e?.message ?? "No se pudieron cargar los usuarios.";
-		} finally {
-			usuariosLoading.value = false;
-		}
-	}
-
 	async function loadMovimientos() {
 		const data = await apiFetch(MOV_ENDPOINT);
 		const list = normalizeList(data);
@@ -595,7 +557,6 @@
 		Object.assign(form, emptyForm(), {
 			idProducto: productos.value?.[0]?.idProducto ?? null,
 			idMotivo: motivos.value?.[0]?.idMotivo ?? null,
-			idUsuario: usuarios.value?.[0]?.idUsuario ?? null,
 		});
 		syncTipoConMotivo();
 		isOpen.value = true;
@@ -611,7 +572,6 @@
 		if (!form.idProducto) return "Debes seleccionar un producto.";
 		if (Number(form.cantidad) <= 0) return "La cantidad debe ser mayor que 0.";
 		if (!form.idMotivo) return "Debes seleccionar un motivo.";
-		if (!form.idUsuario) return "Debes seleccionar un usuario.";
 		return "";
 	}
 
@@ -629,7 +589,6 @@
 				cantidad: Number(form.cantidad),
 				fecha: form.fecha,
 				idMotivo: form.idMotivo != null ? Number(form.idMotivo) : null,
-				idUsuario: Number(form.idUsuario),
 			};
 
 			const created = await apiFetch(MOV_ENDPOINT, {
@@ -716,10 +675,10 @@
 		color: #2563eb;
 	}
 
-	.cube svg {
-		width: 22px;
-		height: 22px;
-	}
+		.cube svg {
+			width: 22px;
+			height: 22px;
+		}
 
 	.h1 {
 		font-weight: 900;
@@ -775,10 +734,10 @@
 		place-items: center;
 	}
 
-	.stat-ic svg {
-		width: 22px;
-		height: 22px;
-	}
+		.stat-ic svg {
+			width: 22px;
+			height: 22px;
+		}
 
 	.ic-blue {
 		background: rgba(59,130,246,.12);
@@ -802,13 +761,13 @@
 		color: #0f172a;
 	}
 
-	.stat-num.green {
-		color: #16a34a;
-	}
+		.stat-num.green {
+			color: #16a34a;
+		}
 
-	.stat-num.red {
-		color: #ef4444;
-	}
+		.stat-num.red {
+			color: #ef4444;
+		}
 
 	.stat-lbl {
 		margin-top: 6px;
@@ -852,10 +811,10 @@
 		place-items: center;
 	}
 
-	.search-ic svg {
-		width: 18px;
-		height: 18px;
-	}
+		.search-ic svg {
+			width: 18px;
+			height: 18px;
+		}
 
 	.search-in {
 		border: 0;
@@ -881,12 +840,12 @@
 		cursor: pointer;
 	}
 
-	.tab.active {
-		background: linear-gradient(180deg,#2f74ff,#1e5ae9);
-		color: #fff;
-		border-color: transparent;
-		box-shadow: 0 12px 22px rgba(37,99,235,.20);
-	}
+		.tab.active {
+			background: linear-gradient(180deg,#2f74ff,#1e5ae9);
+			color: #fff;
+			border-color: transparent;
+			box-shadow: 0 12px 22px rgba(37,99,235,.20);
+		}
 
 	.table {
 		padding: 0 14px 10px;
@@ -951,13 +910,13 @@
 		border: 1px solid transparent;
 	}
 
-	.pill .dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 99px;
-		background: currentColor;
-		opacity: .85;
-	}
+		.pill .dot {
+			width: 8px;
+			height: 8px;
+			border-radius: 99px;
+			background: currentColor;
+			opacity: .85;
+		}
 
 	.pill-green {
 		color: #16a34a;
@@ -1069,10 +1028,10 @@
 		background-repeat: no-repeat;
 	}
 
-	.field input:focus, .field select:focus, .field textarea:focus {
-		border-color: rgba(59,130,246,.65);
-		box-shadow: 0 0 0 3px rgba(59,130,246,.18);
-	}
+		.field input:focus, .field select:focus, .field textarea:focus {
+			border-color: rgba(59,130,246,.65);
+			box-shadow: 0 0 0 3px rgba(59,130,246,.18);
+		}
 
 	.modalFoot {
 		padding: 14px 18px 18px;
@@ -1102,10 +1061,10 @@
 		box-shadow: 0 14px 28px rgba(37,99,235,.25);
 	}
 
-	.btnPrimary:disabled {
-		opacity: .7;
-		cursor: not-allowed;
-	}
+		.btnPrimary:disabled {
+			opacity: .7;
+			cursor: not-allowed;
+		}
 
 	.alert {
 		border: 1px solid rgba(239,68,68,.25);

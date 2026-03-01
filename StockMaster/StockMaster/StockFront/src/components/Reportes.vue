@@ -125,17 +125,27 @@
 <script setup>
 	import { onMounted, reactive, ref, computed } from "vue";
 	import { getUser } from "../router/auth.service";
-	import { getPermsSafe } from "../services/permissions";
+	import { getPermsSafe, normalizeRole, ROLES } from "../services/permissions";
 	import { apiFetch } from "../services/api";
 
 	const user = computed(() => getUser());
 	const perms = computed(() => getPermsSafe(user.value));
-	const canDownload = computed(
-		() =>
+
+	const userRoleNorm = computed(() => {
+		const raw = user.value ? (user.value.rol || user.value.role || user.value.roleLabel || "") : "";
+		return normalizeRole(raw);
+	});
+
+	const isAuditor = computed(() => userRoleNorm.value === ROLES.AUDITOR);
+
+	const canDownload = computed(() => {
+		if (isAuditor.value) return false;
+		return (
 			perms.value?.canDownloadReportes === true ||
 			perms.value?.canReadAll === true ||
 			perms.value?.canEditAll === true
-	);
+		);
+	});
 
 	const PRODUCTOS_ENDPOINT = `/api/Productos`;
 	const MOVS_ENDPOINT = `/api/Movimientos`;
@@ -197,10 +207,7 @@
 
 	function persistRecent() {
 		try {
-			localStorage.setItem(
-				"sm_recent_reports",
-				JSON.stringify(recentReports.value.slice(0, 10))
-			);
+			localStorage.setItem("sm_recent_reports", JSON.stringify(recentReports.value.slice(0, 10)));
 		} catch { }
 	}
 
@@ -246,8 +253,7 @@
 	}
 
 	function extractCategoriaNombre(raw) {
-		const c =
-			raw?.categoria ?? raw?.Categoria ?? raw?.category ?? raw?.categoriaDto ?? null;
+		const c = raw?.categoria ?? raw?.Categoria ?? raw?.category ?? raw?.categoriaDto ?? null;
 
 		if (c && typeof c === "object") {
 			const name = c?.nombre ?? c?.name ?? c?.descripcion ?? c?.description ?? "";
@@ -262,18 +268,11 @@
 	}
 
 	function normalizeProducto(p, idx, categoriaById) {
-		const id =
-			p?.idProducto ?? p?.IdProducto ?? p?.id ?? p?.Id ?? p?.productoId ?? idx;
+		const id = p?.idProducto ?? p?.IdProducto ?? p?.id ?? p?.Id ?? p?.productoId ?? idx;
 
 		const nombre = p?.nombre ?? p?.Nombre ?? p?.descripcion ?? p?.Descripcion ?? p?.name ?? "";
-		const stock = toNumber(
-			p?.stockActual ?? p?.StockActual ?? p?.stock ?? p?.existencia ?? p?.cantidad ?? p?.qty,
-			0
-		);
-		const minimo = toNumber(
-			p?.stockMinimo ?? p?.StockMinimo ?? p?.minimo ?? p?.minStock ?? p?.reorderLevel,
-			0
-		);
+		const stock = toNumber(p?.stockActual ?? p?.StockActual ?? p?.stock ?? p?.existencia ?? p?.cantidad ?? p?.qty, 0);
+		const minimo = toNumber(p?.stockMinimo ?? p?.StockMinimo ?? p?.minimo ?? p?.minStock ?? p?.reorderLevel, 0);
 
 		const idCat = p?.idCategoria ?? p?.IdCategoria ?? p?.categoriaId ?? p?.CategoriaId ?? null;
 
@@ -311,23 +310,32 @@
 
 	function normalizeMotivo(mm, idx) {
 		const id =
+			mm?.idMotivoMovimiento ??
+			mm?.IdMotivoMovimiento ??
+			mm?.motivoMovimientoId ??
+			mm?.MotivoMovimientoId ??
 			mm?.idMotivo ??
 			mm?.IdMotivo ??
 			mm?.id ??
 			mm?.Id ??
-			mm?.idMotivoMovimiento ??
-			mm?.IdMotivoMovimiento ??
 			idx;
 
-		const nombre = mm?.nombre ?? mm?.Nombre ?? mm?.descripcion ?? mm?.Descripcion ?? "";
+		const nombre =
+			mm?.nombre ??
+			mm?.Nombre ??
+			mm?.descripcion ??
+			mm?.Descripcion ??
+			mm?.name ??
+			mm?.Name ??
+			"";
+
 		return { id: Number(id), nombre: String(nombre ?? "").trim(), _raw: mm };
 	}
 
 	function normalizeMovimiento(m, idx) {
 		const id = m?.idMovimiento ?? m?.IdMovimiento ?? m?.id ?? m?.movimientoId ?? idx;
 
-		const rawDate =
-			m?.fecha ?? m?.Fecha ?? m?.createdAt ?? m?.CreatedAt ?? m?.fechaMovimiento ?? m?.date ?? null;
+		const rawDate = m?.fecha ?? m?.Fecha ?? m?.createdAt ?? m?.CreatedAt ?? m?.fechaMovimiento ?? m?.date ?? null;
 		const dt = rawDate ? new Date(rawDate) : null;
 
 		let tipo = m?.tipo ?? m?.Tipo ?? m?.tipoMovimiento ?? m?.movementType ?? "Entrada";
@@ -340,51 +348,90 @@
 		}
 
 		const prodRaw = m?.producto ?? m?.Producto ?? m?.product ?? m?.Product ?? null;
-		const prodObj = (prodRaw && typeof prodRaw === "object") ? prodRaw : null;
+		const prodObj = prodRaw && typeof prodRaw === "object" ? prodRaw : null;
 
 		const idProducto =
-			Number(
-				m?.idProducto ??
-				m?.IdProducto ??
-				m?.productoId ??
-				m?.ProductoId ??
-				m?.idproducto ??
-				m?.producto_id ??
-				0
-			) ||
-			Number(
-				prodObj?.idProducto ??
-				prodObj?.IdProducto ??
-				prodObj?.id ??
-				prodObj?.Id ??
-				prodObj?.productoId ??
-				prodObj?.ProductoId ??
-				0
-			) ||
+			Number(m?.idProducto ?? m?.IdProducto ?? m?.productoId ?? m?.ProductoId ?? m?.idproducto ?? m?.producto_id ?? 0) ||
+			Number(prodObj?.idProducto ?? prodObj?.IdProducto ?? prodObj?.id ?? prodObj?.Id ?? prodObj?.productoId ?? prodObj?.ProductoId ?? 0) ||
 			null;
 
-		const idUsuario = Number(m?.idUsuario ?? m?.IdUsuario ?? m?.usuarioId ?? 0) || null;
+		const idUsuario = Number(m?.idUsuario ?? m?.IdUsuario ?? m?.usuarioId ?? m?.UsuarioId ?? 0) || null;
 
-		const idMotivo =
+		const motivoObj =
+			m?.motivoMovimiento ??
+			m?.MotivoMovimiento ??
+			m?.motivo ??
+			m?.Motivo ??
+			m?.motivoDto ??
+			m?.MotivoDto ??
+			null;
+
+		const idMotivoDirect =
 			Number(
-				m?.idMotivo ??
-				m?.IdMotivo ??
 				m?.idMotivoMovimiento ??
 				m?.IdMotivoMovimiento ??
+				m?.motivoMovimientoId ??
+				m?.MotivoMovimientoId ??
+				m?.idMotivo ??
+				m?.IdMotivo ??
 				m?.motivoId ??
+				m?.MotivoId ??
 				0
-			) || null;
+			) || 0;
 
-		const motivoDirecto =
-			m?.motivoNombre ??
-			m?.MotivoNombre ??
-			m?.motivo?.nombre ??
-			m?.motivo?.descripcion ??
-			m?.Motivo?.Nombre ??
-			m?.motivo ??
-			m?.comentario ??
-			m?.reason ??
-			"";
+		const idMotivoFromObj =
+			motivoObj && typeof motivoObj === "object"
+				? Number(
+					motivoObj?.idMotivoMovimiento ??
+					motivoObj?.IdMotivoMovimiento ??
+					motivoObj?.motivoMovimientoId ??
+					motivoObj?.MotivoMovimientoId ??
+					motivoObj?.idMotivo ??
+					motivoObj?.IdMotivo ??
+					motivoObj?.id ??
+					motivoObj?.Id ??
+					0
+				) || 0
+				: 0;
+
+		const idMotivo = (idMotivoDirect || idMotivoFromObj) ? (idMotivoDirect || idMotivoFromObj) : null;
+
+		let motivo = "";
+
+		const motivoCandidates = [
+			m?.motivoMovimientoNombre,
+			m?.MotivoMovimientoNombre,
+			m?.motivoNombre,
+			m?.MotivoNombre,
+			m?.motivoText,
+			m?.MotivoText,
+			m?.razon,
+			m?.Razon,
+			m?.comentario,
+			m?.Comentario,
+			m?.reason,
+			m?.Reason,
+		];
+
+		for (const v of motivoCandidates) {
+			if (typeof v === "string" && v.trim()) {
+				motivo = v.trim();
+				break;
+			}
+		}
+
+		if (!motivo && motivoObj && typeof motivoObj === "object") {
+			motivo =
+				String(
+					motivoObj?.nombre ??
+					motivoObj?.Nombre ??
+					motivoObj?.descripcion ??
+					motivoObj?.Descripcion ??
+					motivoObj?.name ??
+					motivoObj?.Name ??
+					""
+				).trim() || "";
+		}
 
 		const prodDirecto =
 			(typeof prodRaw === "string" ? prodRaw : "") ||
@@ -406,9 +453,9 @@
 			idProducto,
 			idUsuario,
 			idMotivo,
-			motivo: String(motivoDirecto ?? "").trim() || "",
+			motivo: String(motivo ?? "").trim(),
 			productoNombre: String(prodDirecto ?? "").trim() || "",
-			cantidad: toNumber(m?.cantidad ?? m?.Cantidad ?? m?.qty ?? 0, 0),
+			cantidad: toNumber(m?.cantidad ?? m?.Cantidad ?? m?.qty ?? m?.Qty ?? 0, 0),
 			_raw: m,
 		};
 	}
@@ -467,9 +514,7 @@
 			const contentStream = p.content;
 			const len = new TextEncoder().encode(contentStream).length;
 
-			const contentsObj = addObject(
-				`<< /Length ${len} >>\nstream\n${contentStream}\nendstream`
-			);
+			const contentsObj = addObject(`<< /Length ${len} >>\nstream\n${contentStream}\nendstream`);
 
 			const pageObj = addObject(
 				`<< /Type /Page /Parent PAGES_REF /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontHelv} 0 R /F2 ${fontCour} 0 R >> >> /Contents ${contentsObj} 0 R >>`
@@ -590,9 +635,35 @@
 		return "-".repeat(totalWidth);
 	}
 
+	function buildMotivoMap(motivos) {
+		const map = new Map();
+		for (const mm of motivos) {
+			const id1 = Number(mm?.id ?? 0);
+			if (id1) map.set(id1, mm);
+
+			const raw = mm?._raw || {};
+			const ids = [
+				raw?.idMotivoMovimiento,
+				raw?.IdMotivoMovimiento,
+				raw?.motivoMovimientoId,
+				raw?.MotivoMovimientoId,
+				raw?.idMotivo,
+				raw?.IdMotivo,
+				raw?.id,
+				raw?.Id,
+			];
+
+			for (const v of ids) {
+				const n = Number(v || 0);
+				if (n && !map.has(n)) map.set(n, mm);
+			}
+		}
+		return map;
+	}
+
 	async function buildReportPdf(tipo, mes, anio) {
 		if (!canDownload.value) {
-			throw new Error("Tu rol está en solo lectura y no tiene permiso para descargar reportes.");
+			throw new Error("Solo lectura: sin permiso para descargar reportes.");
 		}
 
 		loadError.value = "";
@@ -606,10 +677,7 @@
 		]);
 
 		if (usersPack?.error) loadError.value = usersPack.error;
-		if (motivosPack?.error)
-			loadError.value = loadError.value
-				? `${loadError.value} | ${motivosPack.error}`
-				: motivosPack.error;
+		if (motivosPack?.error) loadError.value = loadError.value ? `${loadError.value} | ${motivosPack.error}` : motivosPack.error;
 
 		const categorias = normalizeList(catsRaw);
 		const categoriaById = new Map(
@@ -635,7 +703,7 @@
 
 		const prodById = new Map(productos.map((p) => [Number(p.id), p]));
 		const userById = new Map(usuarios.map((u) => [Number(u.id), u]));
-		const motivoById = new Map(motivos.map((mm) => [Number(mm.id), mm]));
+		const motivoById = buildMotivoMap(motivos);
 
 		if (tipo === "stock-actual") {
 			const t = "Reporte: Stock Actual";
@@ -646,9 +714,7 @@
 			lines.push(`| ${col("ID", 5)} | ${col("PRODUCTO", 34)} | ${col("CATEGORIA", 26)} | ${col("STOCK", 9, "right")} | ${col("MIN", 7, "right")} |`);
 			lines.push(rowSep(totalW));
 
-			const ordered = [...productos].sort((a, b) =>
-				toAsciiSafe(a.nombre).localeCompare(toAsciiSafe(b.nombre))
-			);
+			const ordered = [...productos].sort((a, b) => toAsciiSafe(a.nombre).localeCompare(toAsciiSafe(b.nombre)));
 
 			for (const p of ordered) {
 				lines.push(`| ${col(p.id, 5)} | ${col(p.nombre, 34)} | ${col(p.categoriaNombre || "—", 26)} | ${col(p.stock, 9, "right")} | ${col(p.minimo, 7, "right")} |`);
@@ -659,9 +725,7 @@
 		}
 
 		if (tipo === "stock-critico") {
-			const crit = productos.filter(
-				(p) => toNumber(p.minimo, 0) > 0 && toNumber(p.stock, 0) <= toNumber(p.minimo, 0)
-			);
+			const crit = productos.filter((p) => toNumber(p.minimo, 0) > 0 && toNumber(p.stock, 0) <= toNumber(p.minimo, 0));
 
 			const t = "Reporte: Stock Critico";
 			const sub = `Fecha: ${ymdToday()}   Total criticos: ${crit.length}`;
@@ -671,9 +735,7 @@
 			lines.push(`| ${col("ID", 5)} | ${col("PRODUCTO", 34)} | ${col("CATEGORIA", 26)} | ${col("STOCK", 9, "right")} | ${col("MIN", 7, "right")} |`);
 			lines.push(rowSep(totalW));
 
-			const ordered = [...crit].sort(
-				(a, b) => (toNumber(a.stock) - toNumber(a.minimo)) - (toNumber(b.stock) - toNumber(b.minimo))
-			);
+			const ordered = [...crit].sort((a, b) => (toNumber(a.stock) - toNumber(a.minimo)) - (toNumber(b.stock) - toNumber(b.minimo)));
 
 			for (const p of ordered) {
 				lines.push(`| ${col(p.id, 5)} | ${col(p.nombre, 34)} | ${col(p.categoriaNombre || "—", 26)} | ${col(p.stock, 9, "right")} | ${col(p.minimo, 7, "right")} |`);
@@ -703,16 +765,14 @@
 		lines.push(rowSep(totalW));
 
 		for (const m of list) {
-			const prod =
-				(m.productoNombre && m.productoNombre.trim())
-					? m.productoNombre
-					: (prodById.get(Number(m.idProducto))?.nombre || "—");
+			const prod = (m.productoNombre && m.productoNombre.trim())
+				? m.productoNombre
+				: (prodById.get(Number(m.idProducto))?.nombre || "—");
 
 			const usu = userById.get(Number(m.idUsuario))?.nombre || "—";
-			const mot =
-				(m.motivo?.trim() || "") ||
-				motivoById.get(Number(m.idMotivo))?.nombre ||
-				"—";
+
+			const motFromId = m.idMotivo ? (motivoById.get(Number(m.idMotivo))?.nombre || "") : "";
+			const mot = (m.motivo && m.motivo.trim()) ? m.motivo.trim() : (motFromId ? String(motFromId).trim() : "—");
 
 			lines.push(`| ${col(m.fechaIso || "", 10)} | ${col(m.tipo, 8)} | ${col(m.cantidad, 6, "right")} | ${col(prod, 34)} | ${col(mot, 20)} | ${col(usu, 22)} |`);
 		}
